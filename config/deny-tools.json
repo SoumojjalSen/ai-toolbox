@@ -1,0 +1,12 @@
+[
+  "place_order",
+  "cancel_order",
+  "modify_order",
+  "create_gtt",
+  "delete_gtt",
+  "modify_gtt",
+  "place_amo_order",
+  "cancel_amo_order",
+  "exit_position",
+  "convert_position"
+]
