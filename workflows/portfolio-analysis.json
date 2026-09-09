@@ -6,7 +6,7 @@
       "id": "holdings",
       "type": "mcp",
       "server": "groww",
-      "tool": "get_holdings",
+      "tool": "get_equity_portfolio_holdings",
       "args": {}
     },
     {

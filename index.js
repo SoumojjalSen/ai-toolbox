@@ -44,7 +44,7 @@ async function callMcp(serverName, toolName, args = {}) {
     const result = await client.callTool({ name: toolName, arguments: args });
     return result;
   } finally {
-    await client.close();
+    try { await client.close(); } catch {}
   }
 }
 
