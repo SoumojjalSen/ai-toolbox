@@ -1,6 +1,6 @@
 import express from "express";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -34,7 +34,10 @@ async function callMcp(serverName, toolName, args = {}) {
   if (denyTools.has(toolName)) throw new Error(`Blocked tool: ${toolName}`);
 
   const client = new Client({ name: "flowpilot", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(config.url));
+  const transport = new StdioClientTransport({
+    command: "npx",
+    args: ["-y", "mcp-remote@0.1.38", config.url, ...(config.callbackPort ? [String(config.callbackPort)] : [])],
+  });
   await client.connect(transport);
 
   try {

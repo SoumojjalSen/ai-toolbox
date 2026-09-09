@@ -1,6 +1,7 @@
 {
   "groww": {
-    "url": "https://mcp.groww.in/mcp"
+    "url": "https://mcp.groww.in/mcp",
+    "callbackPort": 52155
   },
   "kite": {
     "url": "https://mcp.kite.trade/mcp"
