@@ -1,7 +1,7 @@
 import express from "express";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -31,10 +31,20 @@ async function callMcp(serverName, toolName, args = {}) {
   }
 }
 
-async function callAi(content, providerName) {
+function loadSkill(name) {
+  const path = join(__dirname, "skills", `${name}.md`);
+  if (!existsSync(path)) throw new Error(`Unknown skill: ${name}`);
+  return readFileSync(path, "utf8");
+}
+
+async function callAi(content, providerName, systemPrompt) {
   const name = providerName || providers.default;
   const provider = providers[name];
   if (!provider) throw new Error(`Unknown provider: ${name}`);
+
+  const messages = [];
+  if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+  messages.push({ role: "user", content });
 
   const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : "";
   const res = await fetch(`${provider.baseUrl}/chat/completions`, {
@@ -45,7 +55,7 @@ async function callAi(content, providerName) {
     },
     body: JSON.stringify({
       model: provider.model,
-      messages: [{ role: "user", content }],
+      messages,
       max_tokens: 4096,
     }),
   });
@@ -95,14 +105,19 @@ app.post("/mcp/:server/:tool", async (req, res) => {
   }
 });
 
-// Call AI with a prompt (supports text and images)
-// Text only: { "prompt": "analyze this" }
-// With image: { "prompt": "what is this?", "images": ["data:image/png;base64,..."] }
+// Call AI with a prompt (supports text, images, skills, and system prompts)
+// Text:   { "prompt": "analyze this" }
+// Image:  { "prompt": "what is this?", "images": ["data:image/png;base64,..."] }
+// Skill:  { "prompt": "analyze my portfolio", "skill": "portfolio-analyst" }
+// System: { "prompt": "analyze this", "system": "You are a financial expert..." }
 app.post("/ai", async (req, res) => {
-  const { prompt, images, provider } = req.body;
+  const { prompt, images, provider, skill, system } = req.body;
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
   try {
+    let systemPrompt = system || null;
+    if (skill) systemPrompt = loadSkill(skill);
+
     let content;
     if (images?.length) {
       content = [
@@ -112,11 +127,19 @@ app.post("/ai", async (req, res) => {
     } else {
       content = prompt;
     }
-    const result = await callAi(content, provider);
+    const result = await callAi(content, provider, systemPrompt);
     res.json({ response: result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// List available skills
+app.get("/skills", (_, res) => {
+  const skillsDir = join(__dirname, "skills");
+  if (!existsSync(skillsDir)) return res.json({ skills: [] });
+  const skills = readdirSync(skillsDir).filter(f => f.endsWith(".md")).map(f => f.replace(".md", ""));
+  res.json({ skills });
 });
 
 const PORT = process.env.PORT || 3000;
