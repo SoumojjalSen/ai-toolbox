@@ -111,21 +111,24 @@ app.post("/mcp/:server/:tool", async (req, res) => {
 // Skill:  { "prompt": "analyze my portfolio", "skill": "portfolio-analyst" }
 // System: { "prompt": "analyze this", "system": "You are a financial expert..." }
 app.post("/ai", async (req, res) => {
-  const { prompt, images, provider, skill, system } = req.body;
+  const { prompt, images, provider, skill, system, format } = req.body;
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
   try {
     let systemPrompt = system || null;
     if (skill) systemPrompt = loadSkill(skill);
 
+    let finalPrompt = prompt;
+    if (format === "html") finalPrompt += "\n\nRespond in clean HTML with inline CSS suitable for email. Use tables, bold, colors for positive/negative values. No markdown.";
+
     let content;
     if (images?.length) {
       content = [
         ...images.map(img => ({ type: "image_url", image_url: { url: img } })),
-        { type: "text", text: prompt },
+        { type: "text", text: finalPrompt },
       ];
     } else {
-      content = prompt;
+      content = finalPrompt;
     }
     const result = await callAi(content, provider, systemPrompt);
     res.json({ response: result });
