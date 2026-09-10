@@ -56,7 +56,7 @@ async function callAi(content, providerName, systemPrompt) {
     body: JSON.stringify({
       model: provider.model,
       messages,
-      max_tokens: 4096,
+      max_tokens: 16384,
     }),
   });
 
