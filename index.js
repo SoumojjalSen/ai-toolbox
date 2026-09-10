@@ -1,7 +1,7 @@
 import express from "express";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { readFileSync, readdirSync } from "fs";
+import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -11,22 +11,6 @@ const load = (f) => JSON.parse(readFileSync(join(__dirname, f), "utf8"));
 const mcpConfig = load("config/mcps.json");
 const providers = load("config/providers.json");
 const denyTools = new Set(load("config/deny-tools.json"));
-
-const workflows = {};
-for (const f of readdirSync(join(__dirname, "workflows"))) {
-  if (f.endsWith(".json")) {
-    const wf = load(`workflows/${f}`);
-    workflows[wf.name] = wf;
-  }
-}
-
-function template(str, ctx) {
-  return str.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_, path) => {
-    let val = ctx;
-    for (const key of path.split(".")) val = val?.[key];
-    return val !== undefined ? (typeof val === "object" ? JSON.stringify(val) : String(val)) : "";
-  });
-}
 
 async function callMcp(serverName, toolName, args = {}) {
   const config = mcpConfig[serverName];
@@ -41,8 +25,7 @@ async function callMcp(serverName, toolName, args = {}) {
   await client.connect(transport);
 
   try {
-    const result = await client.callTool({ name: toolName, arguments: args });
-    return result;
+    return await client.callTool({ name: toolName, arguments: args });
   } finally {
     try { await client.close(); } catch {}
   }
@@ -76,71 +59,50 @@ async function callAi(prompt, providerName) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function executeStep(step, ctx) {
-  switch (step.type) {
-    case "mcp": {
-      const args = step.args ? JSON.parse(template(JSON.stringify(step.args), ctx)) : {};
-      return await callMcp(step.server, step.tool, args);
-    }
-    case "ai": {
-      const prompt = template(step.prompt, ctx);
-      return await callAi(prompt, step.provider);
-    }
-    case "filter": {
-      const data = typeof ctx.prev === "string" ? JSON.parse(ctx.prev) : ctx.prev;
-      return eval(`(${JSON.stringify(data)})${step.expression}`);
-    }
-    case "http": {
-      const url = template(step.url, ctx);
-      const res = await fetch(url, {
-        method: step.method || "GET",
-        headers: step.headers || {},
-        body: step.body ? template(JSON.stringify(step.body), ctx) : undefined,
-      });
-      return await res.json();
-    }
-    default:
-      throw new Error(`Unknown step type: ${step.type}`);
-  }
-}
-
-async function runWorkflow(name, params = {}) {
-  const wf = workflows[name];
-  if (!wf) throw new Error(`Unknown workflow: ${name}`);
-
-  const ctx = { params, prev: null, steps: {} };
-  const log = [];
-
-  for (const step of wf.steps) {
-    const start = Date.now();
-    try {
-      const result = await executeStep(step, ctx);
-      ctx.prev = result;
-      if (step.id) ctx.steps[step.id] = result;
-      log.push({ id: step.id, type: step.type, ms: Date.now() - start, ok: true });
-    } catch (err) {
-      log.push({ id: step.id, type: step.type, ms: Date.now() - start, ok: false, error: err.message });
-      throw err;
-    }
-  }
-
-  return { result: ctx.prev, log };
-}
-
 const app = express();
 app.use(express.json());
 
-app.get("/health", (_, res) => res.json({ status: "ok", workflows: Object.keys(workflows) }));
+app.get("/health", (_, res) => res.json({ status: "ok", mcps: Object.keys(mcpConfig), providers: Object.keys(providers).filter(k => k !== "default") }));
 
-app.get("/workflows", (_, res) => res.json(workflows));
+// List available tools for an MCP server
+app.get("/mcp/:server/tools", async (req, res) => {
+  const config = mcpConfig[req.params.server];
+  if (!config) return res.status(404).json({ error: `Unknown MCP server: ${req.params.server}` });
 
-app.post("/run", async (req, res) => {
-  const { workflow, params } = req.body;
-  if (!workflow) return res.status(400).json({ error: "workflow name required" });
+  const client = new Client({ name: "flowpilot", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: "npx",
+    args: ["-y", "mcp-remote@0.1.38", config.url, ...(config.callbackPort ? [String(config.callbackPort)] : [])],
+  });
+  await client.connect(transport);
 
   try {
-    const result = await runWorkflow(workflow, params || {});
+    const tools = await client.listTools();
+    const safe = tools.tools.filter(t => !denyTools.has(t.name));
+    res.json({ server: req.params.server, tools: safe.map(t => ({ name: t.name, description: t.description })) });
+  } finally {
+    try { await client.close(); } catch {}
+  }
+});
+
+// Call an MCP tool
+app.post("/mcp/:server/:tool", async (req, res) => {
+  try {
+    const result = await callMcp(req.params.server, req.params.tool, req.body || {});
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Call AI with a prompt
+app.post("/ai", async (req, res) => {
+  const { prompt, provider } = req.body;
+  if (!prompt) return res.status(400).json({ error: "prompt required" });
+
+  try {
+    const result = await callAi(prompt, provider);
+    res.json({ response: result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
