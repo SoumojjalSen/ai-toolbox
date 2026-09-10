@@ -31,7 +31,7 @@ async function callMcp(serverName, toolName, args = {}) {
   }
 }
 
-async function callAi(prompt, providerName) {
+async function callAi(content, providerName) {
   const name = providerName || providers.default;
   const provider = providers[name];
   if (!provider) throw new Error(`Unknown provider: ${name}`);
@@ -45,7 +45,7 @@ async function callAi(prompt, providerName) {
     },
     body: JSON.stringify({
       model: provider.model,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content }],
       max_tokens: 4096,
     }),
   });
@@ -60,7 +60,7 @@ async function callAi(prompt, providerName) {
 }
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 app.get("/health", (_, res) => res.json({ status: "ok", mcps: Object.keys(mcpConfig), providers: Object.keys(providers).filter(k => k !== "default") }));
 
@@ -95,13 +95,24 @@ app.post("/mcp/:server/:tool", async (req, res) => {
   }
 });
 
-// Call AI with a prompt
+// Call AI with a prompt (supports text and images)
+// Text only: { "prompt": "analyze this" }
+// With image: { "prompt": "what is this?", "images": ["data:image/png;base64,..."] }
 app.post("/ai", async (req, res) => {
-  const { prompt, provider } = req.body;
+  const { prompt, images, provider } = req.body;
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
   try {
-    const result = await callAi(prompt, provider);
+    let content;
+    if (images?.length) {
+      content = [
+        ...images.map(img => ({ type: "image_url", image_url: { url: img } })),
+        { type: "text", text: prompt },
+      ];
+    } else {
+      content = prompt;
+    }
+    const result = await callAi(content, provider);
     res.json({ response: result });
   } catch (err) {
     res.status(500).json({ error: err.message });
