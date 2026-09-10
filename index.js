@@ -17,7 +17,7 @@ async function callMcp(serverName, toolName, args = {}) {
   if (!config) throw new Error(`Unknown MCP server: ${serverName}`);
   if (denyTools.has(toolName)) throw new Error(`Blocked tool: ${toolName}`);
 
-  const client = new Client({ name: "flowpilot", version: "1.0.0" });
+  const client = new Client({ name: "ai-toolbox", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["-y", "mcp-remote@0.1.38", config.url, ...(config.callbackPort ? [String(config.callbackPort)] : [])],
@@ -79,7 +79,7 @@ app.get("/mcp/:server/tools", async (req, res) => {
   const config = mcpConfig[req.params.server];
   if (!config) return res.status(404).json({ error: `Unknown MCP server: ${req.params.server}` });
 
-  const client = new Client({ name: "flowpilot", version: "1.0.0" });
+  const client = new Client({ name: "ai-toolbox", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["-y", "mcp-remote@0.1.38", config.url, ...(config.callbackPort ? [String(config.callbackPort)] : [])],
@@ -143,4 +143,4 @@ app.get("/skills", (_, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`FlowPilot running on :${PORT}`));
+app.listen(PORT, () => console.log(`ai-toolbox running on :${PORT}`));

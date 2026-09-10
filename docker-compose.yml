@@ -9,11 +9,11 @@ services:
       - cliproxyapi_data:/CLIProxyAPI
     restart: unless-stopped
 
-  flowpilot:
-    image: ghcr.io/soumojjalsen/flowpilot:latest
-    container_name: flowpilot
+  ai-toolbox:
+    image: ghcr.io/soumojjalsen/ai-toolbox:latest
+    container_name: ai-toolbox
     network_mode: host
-    env_file: /etc/flowpilot/.env
+    env_file: /etc/ai-toolbox/.env
     restart: unless-stopped
     depends_on:
       - cliproxyapi
