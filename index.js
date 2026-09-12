@@ -125,7 +125,7 @@ app.post("/ai", async (req, res) => {
     if (skill) systemPrompt = loadSkill(skill);
 
     let finalPrompt = prompt;
-    if (format === "html") finalPrompt += "\n\nRespond in clean HTML with inline CSS suitable for email. Rules: max-width 600px, use percentage widths on tables (width:100%), font-size minimum 14px, no fixed pixel widths, wrap in a single-column layout. Tables must have overflow-x:auto wrapper div. Use bold, colors (green for positive, red for negative). No markdown.";
+    if (format === "html") finalPrompt += "\n\nRespond in clean, attractive HTML with inline CSS for email. Mobile-friendly, max-width 600px. Green for gains, red for losses. No markdown.";
 
     let content;
     if (images?.length) {
