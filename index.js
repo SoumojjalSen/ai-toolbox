@@ -69,6 +69,8 @@ async function callAi(content, providerName, systemPrompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
+const log = (method, path, extra = "") => console.log(`[${new Date().toISOString()}] ${method} ${path}${extra ? " " + extra : ""}`);
+
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
@@ -97,10 +99,13 @@ app.get("/mcp/:server/tools", async (req, res) => {
 
 // Call an MCP tool
 app.post("/mcp/:server/:tool", async (req, res) => {
+  log("POST", `/mcp/${req.params.server}/${req.params.tool}`);
   try {
     const result = await callMcp(req.params.server, req.params.tool, req.body || {});
+    log("POST", `/mcp/${req.params.server}/${req.params.tool}`, "200");
     res.json(result);
   } catch (err) {
+    log("POST", `/mcp/${req.params.server}/${req.params.tool}`, `500 ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -114,6 +119,7 @@ app.post("/ai", async (req, res) => {
   const { prompt, images, provider, skill, system, format } = req.body;
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
+  log("POST", "/ai", `skill=${skill || "none"} provider=${provider || "default"} format=${format || "text"}`);
   try {
     let systemPrompt = system || null;
     if (skill) systemPrompt = loadSkill(skill);
@@ -130,9 +136,12 @@ app.post("/ai", async (req, res) => {
     } else {
       content = finalPrompt;
     }
+    const start = Date.now();
     const result = await callAi(content, provider, systemPrompt);
+    log("POST", "/ai", `200 ${((Date.now() - start) / 1000).toFixed(1)}s`);
     res.json({ response: result });
   } catch (err) {
+    log("POST", "/ai", `500 ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
