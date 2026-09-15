@@ -34,8 +34,10 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ steps.lower.outputs.image }}:latest
             ${{ env.REGISTRY }}/${{ steps.lower.outputs.image }}:${{ github.sha }}
