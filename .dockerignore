@@ -1,0 +1,15 @@
+# Exclude from Docker build context — keeps builds fast, secrets out
+# Without this, all files are uploaded to the Docker daemon before the build starts (slow + leaks .env)
+# docker build .
+#   Step 1: Upload ALL files to daemon        ← .dockerignore controls this
+#   Step 2: Dockerfile COPY picks from them   ← only these go into the image
+
+#   Without .dockerignore: 200MB uploaded, but only 6KB actually copied into image
+#   With .dockerignore:    6KB uploaded, 6KB copied into image
+
+#   The image is the same size either way (assuming specific COPY commands). The upload is what's wasteful.
+node_modules
+.git
+.env
+dist
+README.md

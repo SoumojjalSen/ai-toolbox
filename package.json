@@ -3,11 +3,19 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --env-file=.env --watch index.js"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx --env-file=.env --watch src/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }
