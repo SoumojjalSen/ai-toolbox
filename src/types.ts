@@ -50,6 +50,13 @@ export interface ChatMessage {
   content: MessageContent
 }
 
+// Research endpoint response (Gemini with search grounding)
+export interface ResearchResult {
+  response: string
+  sources: Array<{ url: string; title: string }>
+  queries: string[]
+}
+
 // OpenAI-compatible chat completion response (from CLIProxyAPI / OpenRouter)
 export interface ChatCompletionResponse {
   id: string

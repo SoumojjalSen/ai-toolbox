@@ -8,6 +8,7 @@ router.get("/health", (_req, res) => {
     status: "ok",
     mcps: Object.keys(mcpConfig),
     providers: Object.keys(providers).filter((key) => typeof providers[key] !== "string"),
+    research: !!process.env.GEMINI_API_KEY,
   })
 })
 

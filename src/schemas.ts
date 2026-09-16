@@ -11,3 +11,9 @@ export const aiRequestSchema = z.object({
 })
 
 export type AiRequest = z.infer<typeof aiRequestSchema>
+
+export const researchRequestSchema = z.object({
+  query: z.string().min(1),
+})
+
+export type ResearchRequest = z.infer<typeof researchRequestSchema>

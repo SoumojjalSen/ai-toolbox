@@ -4,6 +4,7 @@ import healthRouter from "./routes/health.js"
 import mcpRouter from "./routes/mcp.js"
 import aiRouter from "./routes/ai.js"
 import skillsRouter from "./routes/skills.js"
+import researchRouter from "./routes/research.js"
 import { errorHandler } from "./errors.js"
 import { pkg } from "./config.js"
 
@@ -28,6 +29,7 @@ app.use(healthRouter)
 app.use(mcpRouter)
 app.use(aiRouter)
 app.use(skillsRouter)
+app.use(researchRouter)
 
 app.use(errorHandler)
 
