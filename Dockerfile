@@ -9,6 +9,9 @@ RUN npx tsc
 FROM node:22-alpine AS runtime
 # Claude Code CLI answers /ai (auth: CLAUDE_CODE_OAUTH_TOKEN); skills load from .claude/skills
 RUN npm i -g @anthropic-ai/claude-code
+# Session files (one per /ai run = its full research path) auto-delete after 7 days.
+# Set for the container user only — in the repo's .claude/settings.json it would also prune your local history.
+RUN mkdir -p /root/.claude && echo '{"cleanupPeriodDays": 7}' > /root/.claude/settings.json
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

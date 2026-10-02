@@ -6,12 +6,15 @@ import aiRouter from "./routes/ai.js"
 import skillsRouter from "./routes/skills.js"
 import { errorHandler } from "./errors.js"
 import { packageJson } from "./config.js"
+import { log } from "./log.js"
 
+// Logs when a request starts too — /ai runs for minutes, so "finished" alone looks like nothing is happening
 function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestStartMs = Date.now()
+  log(`${req.method} ${req.path} started`)
   res.on("finish", () => {
     const durationSeconds = ((Date.now() - requestStartMs) / 1000).toFixed(1)
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${durationSeconds}s`)
+    log(`${req.method} ${req.path} ${res.statusCode} ${durationSeconds}s`)
   })
   next()
 }
