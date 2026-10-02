@@ -41,3 +41,19 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ steps.lower.outputs.image }}:latest
             ${{ env.REGISTRY }}/${{ steps.lower.outputs.image }}:${{ github.sha }}
+
+  # Roll the new image out so a push (code or .claude/skills/*) is live in ~3 min, no SSH by hand.
+  # Same secrets as server-config: SSH_PRIVATE_KEY, VM_HOST, VM_USER.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/apps/server-config
+            docker-compose pull ai-toolbox
+            docker-compose up -d ai-toolbox

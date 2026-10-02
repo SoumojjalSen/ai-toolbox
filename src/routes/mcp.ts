@@ -2,14 +2,14 @@ import { Router } from "express"
 import { asyncHandler } from "../errors.js"
 import { invokeMcpTool, listMcpTools } from "../services/mcp.js"
 
-interface ConnectorParams { connector: string }
+interface McpConnectorParams { connector: string }
 interface McpToolInvokeParams { connector: string; tool: string }
 
 const router = Router()
 
 router.get(
   "/mcp/:connector/tools",
-  asyncHandler<ConnectorParams>(async (req, res) => {
+  asyncHandler<McpConnectorParams>(async (req, res) => {
     const tools = await listMcpTools(req.params.connector)
     res.json({ connector: req.params.connector, tools })
   }),

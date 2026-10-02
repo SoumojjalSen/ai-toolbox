@@ -4,15 +4,14 @@ import healthRouter from "./routes/health.js"
 import mcpRouter from "./routes/mcp.js"
 import aiRouter from "./routes/ai.js"
 import skillsRouter from "./routes/skills.js"
-import researchRouter from "./routes/research.js"
 import { errorHandler } from "./errors.js"
-import { pkg } from "./config.js"
+import { packageJson } from "./config.js"
 
 function requestLogger(req: Request, res: Response, next: NextFunction) {
-  const start = Date.now()
+  const requestStartMs = Date.now()
   res.on("finish", () => {
-    const duration = ((Date.now() - start) / 1000).toFixed(1)
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${duration}s`)
+    const durationSeconds = ((Date.now() - requestStartMs) / 1000).toFixed(1)
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${durationSeconds}s`)
   })
   next()
 }
@@ -29,9 +28,8 @@ app.use(healthRouter)
 app.use(mcpRouter)
 app.use(aiRouter)
 app.use(skillsRouter)
-app.use(researchRouter)
 
 app.use(errorHandler)
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`${pkg.name} running on :${PORT}`))
+app.listen(PORT, () => console.log(`${packageJson.name} running on :${PORT}`))

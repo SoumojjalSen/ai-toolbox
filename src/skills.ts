@@ -1,26 +1,25 @@
-import { readFileSync, existsSync, readdirSync } from "fs"
+import { existsSync, readdirSync } from "fs"
 import { join } from "path"
 import { AppError } from "./errors.js"
 import { HttpStatus, ErrorCode } from "./constants.js"
 import { ROOT } from "./config.js"
 
-const SKILLS_DIR = join(ROOT, "skills")
-const SKILL_EXTENSION = ".md"
+// Native Claude Code skills: .claude/skills/<name>/SKILL.md. Claude Code loads them itself
+// (cwd is ROOT), we only check the name exists so a typo is a 404, not a confused answer.
+export const SKILLS_DIR = join(ROOT, ".claude", "skills")
 
-export function loadSkill(name: string): string {
-  const skillPath = join(SKILLS_DIR, `${name}${SKILL_EXTENSION}`)
+function getSkillFilePath(skillName: string): string {
+  return join(SKILLS_DIR, skillName, "SKILL.md")
+}
 
-  if (!existsSync(skillPath)) {
-    throw new AppError(HttpStatus.NOT_FOUND, ErrorCode.UNKNOWN_SKILL, `Unknown skill: ${name}`)
+export function assertSkillExists(skillName: string): void {
+  if (!existsSync(getSkillFilePath(skillName))) {
+    throw new AppError(HttpStatus.NOT_FOUND, ErrorCode.UNKNOWN_SKILL, `Unknown skill: ${skillName}`)
   }
-
-  return readFileSync(skillPath, "utf8")
 }
 
 export function listSkills(): string[] {
   if (!existsSync(SKILLS_DIR)) return []
 
-  return readdirSync(SKILLS_DIR)
-    .filter((file) => file.endsWith(SKILL_EXTENSION))
-    .map((file) => file.replace(SKILL_EXTENSION, ""))
+  return readdirSync(SKILLS_DIR).filter((skillName) => existsSync(getSkillFilePath(skillName)))
 }
