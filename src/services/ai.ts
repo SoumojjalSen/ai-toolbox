@@ -107,6 +107,11 @@ export async function generateAiResponse(prompt: string, imageUrls: string[] = [
     // Repo settings only — locally your Mac's plugins, hooks and personal skills would load; the container has none
     "--setting-sources", "project",
   ]
+  // Only set in the container (Dockerfile). Must be a flag: Claude Code ignores cleanupPeriodDays in managed
+  // settings, and --setting-sources project skips user settings.
+  if (process.env.CLAUDE_SESSION_RETENTION_DAYS) {
+    cliArgs.push("--settings", JSON.stringify({ cleanupPeriodDays: Number(process.env.CLAUDE_SESSION_RETENTION_DAYS) }))
+  }
   if (systemPrompt) cliArgs.push("--append-system-prompt", systemPrompt)
 
   const imageBlocks = await Promise.all(
