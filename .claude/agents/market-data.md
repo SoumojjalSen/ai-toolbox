@@ -1,6 +1,6 @@
 ---
 name: market-data
-description: Fetches the pre-market snapshot numbers (Indian indices, VIX, GIFT Nifty, FII/DII, global indices, crude, USD/INR) from two sources each.
+description: Fetches the pre-market snapshot numbers (Indian indices, VIX, GIFT Nifty, FII/DII, global indices, crude, USD/INR, gold, silver) from two sources each.
 tools: WebSearch, WebFetch
 model: sonnet
 ---
@@ -21,6 +21,8 @@ Fetch the latest value and change for each metric below. Use **both** listed sou
 | Hang Seng | Yahoo `^HSI` | Google Finance `HSI:INDEXHANGSENG` |
 | Brent crude | Yahoo `BZ=F` | https://tradingeconomics.com/commodity/brent-crude-oil |
 | USD/INR | Yahoo `INR=X` | Google Finance `USD-INR` |
+| Gold (USD/oz) | Yahoo `GC=F` | https://tradingeconomics.com/commodity/gold |
+| Silver (USD/oz) | Yahoo `SI=F` | https://tradingeconomics.com/commodity/silver |
 
 URLs:
 - Yahoo (JSON, most reliable): `https://query1.finance.yahoo.com/v8/finance/chart/<symbol>?range=5d&interval=1d` — URL-encode `^` as `%5E` and `=` as `%3D`. `meta.regularMarketPrice` is the latest value; `meta.chartPreviousClose` and the `close` array give the change.
