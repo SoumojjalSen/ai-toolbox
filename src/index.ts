@@ -34,5 +34,6 @@ app.use(skillsRouter)
 
 app.use(errorHandler)
 
-const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log(`${packageJson.name} running on :${PORT}`))
+const PORT = Number(process.env.PORT) || 8080
+// Loopback only: /ai has no auth, so only processes on the same machine (n8n on the VM) may reach it
+app.listen(PORT, "127.0.0.1", () => console.log(`${packageJson.name} running on 127.0.0.1:${PORT}`))
