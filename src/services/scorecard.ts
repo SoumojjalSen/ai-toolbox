@@ -70,7 +70,8 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
   let skipped = 0
   for (const file of files) {
     const index = sessionIndex.get(file.replace(/\.json$/, ""))
-    if (index === undefined || index < sessions.length - TRACK_RECORD_SESSIONS) continue
+    // today's picks (latest session) have nothing to score yet
+    if (index === undefined || index === sessions.length - 1 || index < sessions.length - TRACK_RECORD_SESSIONS) continue
     const picks = JSON.parse(await readFile(join(PICKS_DIR, file), "utf8")) as RecordedPick[]
     for (const pick of picks) {
       const laterBars = sessions.slice(index + 1).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is BhavcopyRow => !!row)
@@ -87,7 +88,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
       }
     }
   }
-  if (!files.length) return ""
+  if (!overall.closed && !open && !skipped) return ""
   return [
     `### Track record of this system's top core setups (live, last ~${TRACK_RECORD_SESSIONS} sessions; R = multiples of the risk taken)`,
     describe("All", overall) + ` · ${open} still open · ${skipped} skipped (gapped above entry)`,

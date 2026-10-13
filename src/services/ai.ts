@@ -126,6 +126,7 @@ export async function generateAiResponse(prompt: string, imageUrls: string[] = [
     const claudeProcess = spawn("claude", cliArgs, { cwd: ROOT, timeout: CLAUDE_TIMEOUT_MS })
     const subagentRunsByToolUseId = new Map<string, SubagentRun>()
     let finalResult: ClaudeStreamEvent | undefined
+    let answerText = ""
     let searchCount = 0
     let fetchCount = 0
     let stderrText = ""
@@ -138,8 +139,12 @@ export async function generateAiResponse(prompt: string, imageUrls: string[] = [
       } catch {
         return
       }
-      // with background subagents a run can have several turns, each ending in a "result" — the last one is the answer
-      if (streamEvent.type === "result") finalResult = streamEvent
+      // with background subagents a run has several turns, each ending in a "result": "still waiting for X…", the
+      // answer, and sometimes an empty turn when a late subagent reports after the answer — keep the longest text
+      if (streamEvent.type === "result") {
+        finalResult = streamEvent
+        if ((streamEvent.result ?? "").length > answerText.length) answerText = streamEvent.result ?? ""
+      }
       if (streamEvent.subtype === "task_started" && streamEvent.tool_use_id) {
         subagentRunsByToolUseId.set(streamEvent.tool_use_id, {
           subagentType: streamEvent.subagent_type ?? "general-purpose",
@@ -179,7 +184,7 @@ export async function generateAiResponse(prompt: string, imageUrls: string[] = [
         // our own clock: the result's duration_ms only covers the last turn
         log(`claude: done in ${formatDuration(Date.now() - runStartMs)} · ${runSummary}`)
         logSubagentPhases(subagentRuns, Date.now())
-        return resolve({ text: finalResult.result || "", sessionId })
+        return resolve({ text: answerText, sessionId })
       }
 
       const timedOut = claudeProcess.killed ? `timed out after ${formatDuration(CLAUDE_TIMEOUT_MS)}` : ""
