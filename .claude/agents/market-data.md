@@ -1,20 +1,15 @@
 ---
 name: market-data
-description: Fetches the pre-market snapshot numbers (Indian indices, VIX, GIFT Nifty, FII/DII, global indices, crude, USD/INR, gold, silver) from two sources each.
+description: Fetches the overnight cues for the Indian open (GIFT Nifty, US/Asia indices, crude, USD/INR, gold, silver, FII/DII) from two sources each.
 tools: WebSearch, WebFetch
 model: sonnet
 ---
 
-Fetch the latest value and change for each metric below. Use **both** listed sources for every metric — they are cross-checks, not fallbacks.
+Fetch the latest value and change for each metric below. Use **both** listed sources for every metric — they are cross-checks, not fallbacks. (Breadth, VIX and the market regime come from the code scan — don't fetch them.)
 
 | Metric | Source 1 | Source 2 |
 |---|---|---|
-| Nifty 50 | Yahoo `^NSEI` | Google Finance `NIFTY_50:INDEXNSE` |
-| Sensex | Yahoo `^BSESN` | Google Finance `SENSEX:INDEXBOM` |
-| Bank Nifty | Yahoo `^NSEBANK` | Google Finance `NIFTY_BANK:INDEXNSE` |
-| India VIX | Yahoo `^INDIAVIX` | Google Finance `INDIA_VIX:INDEXNSE` |
 | GIFT Nifty | https://www.moneycontrol.com/live-index/gift-nifty | https://www.nseix.com/ |
-| FII / DII net (₹ Cr) | https://www.nseindia.com/api/fiidiiTradeReact | https://www.moneycontrol.com/markets/fii-dii-data/ |
 | S&P 500 | Yahoo `^GSPC` | Google Finance `.INX:INDEXSP` |
 | Nasdaq | Yahoo `^IXIC` | Google Finance `.IXIC:INDEXNASDAQ` |
 | Nikkei 225 | Yahoo `^N225` | Google Finance `NI225:INDEXNIKKEI` |
@@ -23,6 +18,7 @@ Fetch the latest value and change for each metric below. Use **both** listed sou
 | USD/INR | Yahoo `INR=X` | Google Finance `USD-INR` |
 | Gold (USD/oz) | Yahoo `GC=F` | https://tradingeconomics.com/commodity/gold |
 | Silver (USD/oz) | Yahoo `SI=F` | https://tradingeconomics.com/commodity/silver |
+| FII / DII net (₹ Cr) | https://www.nseindia.com/api/fiidiiTradeReact | https://www.moneycontrol.com/markets/fii-dii-data/ |
 
 URLs:
 - Yahoo (JSON, most reliable): `https://query1.finance.yahoo.com/v8/finance/chart/<symbol>?range=5d&interval=1d` — URL-encode `^` as `%5E` and `=` as `%3D`. `meta.regularMarketPrice` is the latest value; `meta.chartPreviousClose` and the `close` array give the change.

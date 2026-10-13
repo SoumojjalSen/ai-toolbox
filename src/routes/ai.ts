@@ -6,12 +6,16 @@ import { FORMAT_INSTRUCTIONS, convertMarkdownToEmailHtml } from "../formats.js"
 import { generateAiResponse } from "../services/ai.js"
 import { assertSkillExists } from "../skills.js"
 import { buildMarketScan } from "../services/marketScan.js"
+import { readHoldings } from "../services/holdings.js"
 import { log } from "../log.js"
 
 // Data a skill needs that Claude can't fetch reliably itself — attached here so every caller (n8n, the local
 // script, curl) sends the same small request and nothing is duplicated between them.
 const SKILL_CONTEXT_BUILDERS: Record<string, () => Promise<string>> = {
-  "market-analyst": buildMarketScan,
+  "market-analyst": async () => {
+    const holdings = await readHoldings()
+    return [holdings.text, await buildMarketScan(holdings.symbols)].filter(Boolean).join("\n\n")
+  },
 }
 
 // Claude Code doesn't know the date, and IST is what every skill here means by "today"
