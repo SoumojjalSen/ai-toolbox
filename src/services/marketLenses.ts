@@ -1,4 +1,5 @@
 import { fetchNse, fetchNseJson } from "./nse.js"
+import { nseDate } from "./marketStore.js"
 
 // NSE data lenses beyond price/volume: company filings, big-shareholder deals, corporate actions, and the
 // lists that veto a pick (surveillance, F&O ban, results due). Each fetch is optional — a failed NSE call
@@ -33,6 +34,7 @@ export interface MarketLenses {
   vetoes: Map<string, string> // symbol → why it can't be picked (GSM, ASM stage II+)
   cautions: Map<string, string> // symbol → flag that doesn't block a cash swing trade (ASM stage I, F&O ban)
   resultsSoon: Map<string, string> // symbol → results date (next ~3 days)
+  exToday: Map<string, string> // symbol → corporate action going ex today (dividend, split…) — its price drop isn't a real move
 }
 
 // NSE's own filing category decides first; for generic categories ("Updates", "Outcome of Board Meeting") the
@@ -159,5 +161,9 @@ export async function fetchMarketLenses(now = new Date()): Promise<MarketLenses>
     if (/result/i.test(row.purpose) && date >= daysFromNow(-0.5) && date <= resultsHorizon) resultsSoon.set(row.symbol, row.date)
   }
 
-  return { events, resultsLastWeek, deals, specialSituations, vetoes, cautions, resultsSoon }
+  const today = nseDate(now)
+  const exToday = new Map<string, string>()
+  for (const action of corporateActions ?? []) if (action.exDate === today) exToday.set(action.symbol, action.subject)
+
+  return { events, resultsLastWeek, deals, specialSituations, vetoes, cautions, resultsSoon, exToday }
 }

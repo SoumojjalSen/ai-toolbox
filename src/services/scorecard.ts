@@ -1,12 +1,10 @@
-import { mkdir, readdir, readFile, writeFile } from "fs/promises"
-import { join } from "path"
 import type { BhavcopyRow } from "./marketScan.js"
+import { readJson, writeJson, listJson, parseNseDate } from "./marketStore.js"
 
 // Every morning's top core setups are saved; later scans score them against the bhavcopy they already hold —
 // so the report carries its own live track record, per lens, with no extra job or AI.
-// Saved only where the data folder exists (the VM's /data volume); local dev runs skip it silently.
-const PICKS_DIR = join(process.env.MARKET_DATA_DIR ?? "/data/market", "picks")
 const MAX_HOLD_SESSIONS = 30
+const OPEN_TRADE_DAYS = 45 // ~30 sessions: a symbol picked within this window is still the same open trade
 const TRACK_RECORD_SESSIONS = 120
 
 export interface RecordedPick {
@@ -43,13 +41,15 @@ export function scorePick(pick: RecordedPick, laterBars: BhavcopyRow[]): PickOut
   return { status: "expired", r: (laterBars[MAX_HOLD_SESSIONS - 1].close - entry) / risk }
 }
 
+// A setup that stays top-ranked for days is one trade, not one per day — only new symbols are recorded
 export async function recordPicks(sessionDate: string, picks: RecordedPick[]): Promise<void> {
-  try {
-    await mkdir(PICKS_DIR, { recursive: true })
-    await writeFile(join(PICKS_DIR, `${sessionDate}.json`), JSON.stringify(picks, null, 1))
-  } catch {
-    // no data volume (local dev) — nothing to record
+  const stillOpen = new Set<string>()
+  for (const file of await listJson("picks")) {
+    const date = file.replace(/\.json$/, "")
+    if (date === sessionDate || Date.now() - parseNseDate(date) > OPEN_TRADE_DAYS * 86_400_000) continue
+    for (const pick of (await readJson<RecordedPick[]>(`picks/${file}`)) ?? []) stillOpen.add(pick.symbol)
   }
+  await writeJson(`picks/${sessionDate}.json`, picks.filter((pick) => !stillOpen.has(pick.symbol)))
 }
 
 interface Tally { closed: number; wins: number; totalR: number }
@@ -61,7 +61,9 @@ function describe(label: string, tally: Tally): string {
 
 // sessionDates/sessions: oldest → newest, as the scan holds them
 export async function buildTrackRecord(sessionDates: string[], sessions: BhavcopyRow[][]): Promise<string> {
-  const files = await readdir(PICKS_DIR).catch(() => [] as string[])
+  // oldest first, so a symbol repeated on later days (recorded before the dedupe) counts once
+  const files = (await listJson("picks")).sort((a, b) => parseNseDate(a.replace(/\.json$/, "")) - parseNseDate(b.replace(/\.json$/, "")))
+  const counted = new Map<string, number>() // symbol → session index it was first counted at
   const sessionIndex = new Map(sessionDates.map((date, index) => [date, index]))
   const overall: Tally = { closed: 0, wins: 0, totalR: 0 }
   const byLens = new Map<string, Tally>()
@@ -72,8 +74,11 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
     const index = sessionIndex.get(file.replace(/\.json$/, ""))
     // today's picks (latest session) have nothing to score yet
     if (index === undefined || index === sessions.length - 1 || index < sessions.length - TRACK_RECORD_SESSIONS) continue
-    const picks = JSON.parse(await readFile(join(PICKS_DIR, file), "utf8")) as RecordedPick[]
+    const picks = (await readJson<RecordedPick[]>(`picks/${file}`)) ?? []
     for (const pick of picks) {
+      const firstIndex = counted.get(pick.symbol)
+      if (firstIndex !== undefined && index - firstIndex < MAX_HOLD_SESSIONS) continue
+      counted.set(pick.symbol, index)
       const laterBars = sessions.slice(index + 1).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is BhavcopyRow => !!row)
       const outcome = scorePick(pick, laterBars)
       if (outcome.status === "open") { open++; continue }
@@ -95,4 +100,18 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
     ...[...byLens].map(([lens, tally]) => describe(`With ${lens}`, tally)),
     ...[...byRegime].map(([regime, tally]) => describe(`Picked in a ${regime} market`, tally)),
   ].join("\n")
+}
+
+// The report's own swing picks (what the reader actually buys), parsed from its "Swing picks" table:
+// | 🟢 SYMBOL | 🟢 Buy | ₹entry → ₹target · SL ₹stop · by date | … |
+export interface ReportPick { symbol: string; entry: number; target: number; stopLoss: number }
+
+export function parseReportPicks(markdown: string): ReportPick[] {
+  const section = markdown.split(/^#+ .*Swing picks.*$/m)[1]?.split(/^#+ /m)[0] ?? ""
+  return section.split("\n").filter((line) => line.startsWith("|") && /Buy/.test(line)).flatMap((line) => {
+    const cells = line.split("|").slice(1, -1).map((cell) => cell.trim())
+    const symbol = cells[0]?.match(/[A-Z][A-Z0-9&-]+/)?.[0]
+    const [entry, target, stopLoss] = [...(cells[2] ?? "").matchAll(/₹\s?([\d,]+(?:\.\d+)?)/g)].map((match) => Number(match[1].replace(/,/g, "")))
+    return symbol && stopLoss < entry && target > entry ? [{ symbol, entry, target, stopLoss }] : []
+  })
 }

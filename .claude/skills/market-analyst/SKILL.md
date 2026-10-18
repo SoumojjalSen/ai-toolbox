@@ -39,7 +39,7 @@ Your training knowledge is OUTDATED for prices, events and IPOs. Every number, e
 Read as an email on a phone. Layout rules:
 - **Stock tables have 4 columns: Stock · Action · Levels · Analysis & proof.**
   - **Action:** "🟢 Buy" / "🔴 Exit" / "🔴 Avoid" / "Watch".
-  - **Levels:** `₹entry → ₹target · SL ₹stop · by <date ~6 weeks out>`.
+  - **Levels:** `₹entry → ₹target · SL ₹stop · by <date ~6 weeks out>` — exactly this format: the 10:00 email and the evening scorecard read the picks from it.
   - **Analysis & proof:** ≤ 25 words — the lenses that agree and the news check, each with its proof link: trend/price claims → `[chart](https://www.tradingview.com/chart/?symbol=NSE:<SYMBOL>)`; filings → the NSE PDF link; news → the article; fundamentals → Screener.in. E.g. "RS 97, Stage 2, tight 10-day range [chart] · ₹450 cr order [NSE] · no bad news".
 - Start an Action/verdict cell with 🟢 or 🔴 (renders green/red). **Row tint:** start the *Stock* cell with 🟢 / 🔴 for buy / exit-avoid rows and IPOs to apply / avoid.
 - **Callouts:** market-closed or data-gap notice → `> ⚠️ …` (amber). Market today → `> …` (grey).
@@ -47,7 +47,7 @@ Read as an email on a phone. Layout rules:
 
 # Pre-market briefing — <day, date>
 
-Start straight with the picks — one line first: "**Buy** = buy today near the entry price and hold until the target, the stop loss or the sell-by date — whichever comes first. Risk at most 1% of your capital per trade: quantity = (1% of capital) ÷ (entry − stop loss). Don't buy if it opens far above the entry."
+Start straight with the picks — one line first: "**Buy** at about **10:00** with a limit order — the 10:00 *Market check* email says buy or skip for each pick at the live price (never in pre-open or the first 30 minutes: that's when bad fills happen). Hold until the target, the stop loss or the sell-by date, whichever comes first. Risk at most 1% of your capital per trade: quantity = (1% of capital) ÷ (entry − stop loss)."
 
 ### 1. Swing picks (hold up to ~6 weeks) — news-checked
 **Up to 10** `go` picks, most lenses first, then RS. Stock table. Analysis & proof ends with confidence (High / Medium / Low). Above the table, one line from the regime: how many of these to actually take today (e.g. weak → "take at most the top 2").

@@ -7,6 +7,8 @@ import { generateAiResponse } from "../services/ai.js"
 import { assertSkillExists } from "../skills.js"
 import { buildMarketScan } from "../services/marketScan.js"
 import { readHoldings } from "../services/holdings.js"
+import { parseReportPicks } from "../services/scorecard.js"
+import { writeJson, todayIst } from "../services/marketStore.js"
 import { log } from "../log.js"
 
 // Data a skill needs that Claude can't fetch reliably itself — attached here so every caller (n8n, the local
@@ -52,6 +54,11 @@ router.post(
     const promptWithContext = await appendSkillContext(prependTodaysDate(prompt), skill)
     const fullPrompt = appendFormatInstructions(prependSkillCommand(promptWithContext, skill), format)
     const aiResponse = await generateAiResponse(fullPrompt, images, system)
+    // the 10:00 alert (buy or skip) and the evening scorecard work from the report's actual picks
+    if (skill === "market-analyst") {
+      const reportPicks = parseReportPicks(aiResponse.text)
+      if (reportPicks.length) await writeJson(`report-picks/${todayIst()}.json`, reportPicks)
+    }
     // html: Claude wrote Markdown (see FORMAT_INSTRUCTIONS); styling is applied here
     const responseText = format === OutputFormat.HTML ? convertMarkdownToEmailHtml(aiResponse.text) : aiResponse.text
     res.json({ response: responseText, sessionId: aiResponse.sessionId })

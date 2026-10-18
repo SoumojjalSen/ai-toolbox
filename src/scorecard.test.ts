@@ -19,6 +19,15 @@ test("scorePick: target, stop (stop wins a same-session tie), open, not entered"
   assert.deepEqual(scorePick(pick, [bar(108, 110, 100, 105)]), { status: "not entered", r: 0 })
 })
 
+test("recordPicks skips symbols that are still open from an earlier day", async () => {
+  const { readJson } = await import("./services/marketStore.js")
+  const today = new Date()
+  const nse = (daysAgo: number) => new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(today.getTime() - daysAgo * 86_400_000)).replace(/ /g, "-")
+  await recordPicks(nse(3), [{ ...pick, symbol: "OLDOPEN" }])
+  await recordPicks(nse(1), [{ ...pick, symbol: "OLDOPEN" }, { ...pick, symbol: "NEW" }])
+  assert.deepEqual(((await readJson<{ symbol: string }[]>(`picks/${nse(1)}.json`)) ?? []).map((p) => p.symbol), ["NEW"])
+})
+
 test("recordPicks + buildTrackRecord tally results overall, per lens and per regime", async () => {
   await recordPicks("01-Oct-2026", [pick, { ...pick, symbol: "BETA", lenses: [] }])
   const sessionDates = ["01-Oct-2026", "03-Oct-2026", "04-Oct-2026"]
