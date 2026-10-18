@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { classifyAnnouncement } from "./services/marketLenses.js"
+import { classifyAnnouncement } from "../../src/services/market/lenses.js"
 
 test("classifyAnnouncement tags market-moving filings and ignores routine ones", () => {
   const cases: [string, string, string | undefined][] = [

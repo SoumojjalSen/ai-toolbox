@@ -1,7 +1,8 @@
-import { AppError } from "../errors.js"
-import { HttpStatus, ErrorCode } from "../constants.js"
+import { buildIpoBrief } from "./ipo.js"
+import { AppError } from "../../errors.js"
+import { HttpStatus, ErrorCode } from "../../constants.js"
 import { fetchNse, fetchNseJson } from "./nse.js"
-import { fetchMarketLenses, type EventKind, type MarketLenses } from "./marketLenses.js"
+import { fetchMarketLenses, type EventKind, type MarketLenses } from "./lenses.js"
 import { recordPicks, buildTrackRecord } from "./scorecard.js"
 
 // Scans every NSE EQ stock in code — Claude's WebFetch summarises pages with a small model, so it can't
@@ -525,7 +526,7 @@ export async function loadStockSignals() {
 }
 
 export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): Promise<string> {
-  const [{ etfSymbols, sessionDates, sessions, stockSignals }, lenses] = await Promise.all([loadStockSignals(), fetchMarketLenses()])
+  const [{ etfSymbols, sessionDates, sessions, stockSignals }, lenses, ipoBrief] = await Promise.all([loadStockSignals(), fetchMarketLenses(), buildIpoBrief(holdingSymbols)])
   const marketContext = await fetchMarketContext(etfSymbols)
   const signalsBySymbol = new Map(stockSignals.map((s) => [s.symbol, s]))
   const excluded = new Map<string, string>()
@@ -551,6 +552,7 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
     formatSwingSetups(ranked),
     formatHoldingsCheck(holdingSymbols, signalsBySymbol, lenses),
     formatLensSections(lenses, signalsBySymbol, holdingSymbols, excluded),
+    ipoBrief,
     "### Context lists (what moved — not picks on their own)",
     ...buildScanLists(stockSignals).map(formatScanList),
   ].filter(Boolean).join("\n\n")

@@ -3,10 +3,10 @@ import assert from "node:assert/strict"
 import { mkdtempSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
-import type { BhavcopyRow } from "./services/marketScan.js"
+import type { BhavcopyRow } from "../../src/services/market/scan.js"
 
 process.env.MARKET_DATA_DIR = mkdtempSync(join(tmpdir(), "scorecard-"))
-const { scorePick, recordPicks, buildTrackRecord } = await import("./services/scorecard.js")
+const { scorePick, recordPicks, buildTrackRecord } = await import("../../src/services/market/scorecard.js")
 
 const bar = (open: number, high: number, low: number, close: number, symbol = "ACME"): BhavcopyRow =>
   ({ symbol, prevClose: open, open, high, low, close, volume: 1000, turnoverLacs: 100, deliveryPercent: 40 })
@@ -20,7 +20,7 @@ test("scorePick: target, stop (stop wins a same-session tie), open, not entered"
 })
 
 test("recordPicks skips symbols that are still open from an earlier day", async () => {
-  const { readJson } = await import("./services/marketStore.js")
+  const { readJson } = await import("../../src/services/market/store.js")
   const today = new Date()
   const nse = (daysAgo: number) => new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(today.getTime() - daysAgo * 86_400_000)).replace(/ /g, "-")
   await recordPicks(nse(3), [{ ...pick, symbol: "OLDOPEN" }])

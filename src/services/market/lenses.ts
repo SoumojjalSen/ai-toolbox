@@ -1,5 +1,5 @@
 import { fetchNse, fetchNseJson } from "./nse.js"
-import { nseDate } from "./marketStore.js"
+import { nseDate } from "./store.js"
 
 // NSE data lenses beyond price/volume: company filings, big-shareholder deals, corporate actions, and the
 // lists that veto a pick (surveillance, F&O ban, results due). Each fetch is optional — a failed NSE call

@@ -1,7 +1,7 @@
 import { Router } from "express"
 import { asyncHandler } from "../errors.js"
-import { buildMoverAlert } from "../services/marketAlert.js"
-import { buildEveningScorecard } from "../services/marketReview.js"
+import { buildMoverAlert } from "../services/market/alert.js"
+import { buildEveningScorecard } from "../services/market/review.js"
 
 const router = Router()
 

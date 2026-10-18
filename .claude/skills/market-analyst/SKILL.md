@@ -17,6 +17,7 @@ Your training knowledge is OUTDATED for prices, events and IPOs. Every number, e
 - **Track record** of this system's past picks (may be absent in the first weeks).
 - **Swing setups — CORE** (Stage 2 + tight range, RS-ranked, entry / stop loss / target already computed, "other lenses" column with agreeing lenses and ⚠️ warnings) and **WATCHLIST** (leaders not tight yet).
 - **Holdings check** (if holdings were given) and the holdings line itself ("My holdings … synced from Groww on <date>"). No holdings → no holdings section, never mention holdings.
+- **IPOs (NSE official)** — open, upcoming and awaiting-listing mainboard issues with dates, computed listing date, official subscription, shareholder quotas; and holdings near their 90-day anchor unlock.
 - **Company filings** since the last session (NSE, with PDF links), **post-results drift**, **big-shareholder deals**, **special situations**, **results due in 3 days**, **vetoed** stocks, and context lists (gainers, losers, accumulation, distribution, gap-ups, breakdowns), sectors, 52-week highs/lows.
 - **Weekly mode** if the prompt says "weekly".
 
@@ -24,7 +25,7 @@ Your training knowledge is OUTDATED for prices, events and IPOs. Every number, e
 **Phase 1 — in one message, launch in parallel** (give each today's date):
 - `market-data` — overnight cues for the open (feeds "Market today"; never shown as a table)
 - `market-news` — market-wide news and **linkages** (asset plays, commodities, global peers, policy, index changes) and media-reported shocks; pass it the list of filings so it doesn't repeat them
-- `market-ipo-research` — active and upcoming IPOs
+- `market-ipo-research` — pass it the **IPOs (NSE official)** list from the input; it adds GMP, business, valuation and red flags
 - Weekly mode only: `market-multibagger` — pass the top-RS core setups and leaders, big-shareholder buys and post-results-drift names
 
 **Phase 2 — news-check, in one message:** `market-stock-analyser` in batches of 6, with each stock's full scan row:
@@ -62,18 +63,26 @@ From the filings, big-shareholder deals, post-results drift, special situations 
 Table **Stock · Action · Risk if held · Analysis & proof**: holdings or popular stocks with regulatory action, CEO/CFO/auditor exits, promoter selling, results then a fall, 20-day breakdowns on volume, and the worst falling knives (big losers below their 200-day average). 🔴 Exit / 🔴 Avoid.
 
 ### 5. IPO watch
+Dates, listing dates and subscription come from the input's **IPOs (NSE official)** — use them as given (never a blog's number). The agent adds GMP, business, valuation and red flags.
+
+**How to judge (tested on 174 IPOs, Jul 2025 → Oct 2026):** final **QIB (big-institution) subscription decides** — under 20×: median listing gain 0% and almost half listed below the issue price; 20× or more: median +17%, 5 in 99 below. Retail demand above QIB demand: no gain. GMP is a cross-check only (it can't be tested and has missed often). Lenses that must agree for "apply": QIB ≥ 20× (or, before the last day, strong QIB so far) · reasonable valuation vs peers · no serious red flag · GMP not falling sharply.
+
 Table: **IPO · Dates / Band · GMP / Subscription · Verdict**
 - **IPO** — company name in bold, then a few words on the business ("Sector: not found" if unknown)
-- **Dates / Band** — open–close · **Lists <day> <date>** in bold · price band ₹ · issue size if known
-- **GMP / Subscription** — GMP (grey-market premium) ₹ and % with its trend; subscription overall and by QIB / NII (high-net-worth) / Retail. Start with 🟢 when strong, 🔴 when weak.
-- **Verdict** — open: apply for listing gains / long term / avoid. Closed: **Allottees:** what to do on listing day. Start with 🟢 or 🔴.
+- **Dates / Band** — open–close · **Lists <day> <date>** in bold (from the input) · price band ₹ · issue size
+- **GMP / Subscription** — NSE subscription by QIB / NII (high-net-worth) / Retail with its time; GMP ₹ and % with its trend. Start with 🟢 when QIB ≥ 20×, 🔴 when weak.
+- **Verdict** (start with 🟢 or 🔴):
+  - **Closes today:** "Decide at 14:00 — the *Market check* gives apply or skip from the live QIB number" (QIB money mostly arrives on the last day).
+  - **Open, not closing today / upcoming:** what to watch, plus the valuation and red-flag view. Long-term interest only if the business and valuation justify it.
+  - **Closed:** **Allottees:** QIB ≥ 20× → expect a listing gain, sell on listing day (holding to the close made no difference on average); under 20× → a flat or negative listing is likely, sell at the open.
+- **Shareholder quota (⭐ in the input):** if I hold the parent company (check my holdings), say in bold that I'm eligible if I held it before the RHP date, and that I can bid in the shareholder quota AND as retail with the same PAN (up to ₹2 lakh each) — roughly doubling the allotment chance.
 
-↳ **Risk:** 1–2 lines (including source disagreements) + source links. After the table: "My analysis: …" — one line.
+↳ **Risk:** 1–2 lines + source links. After the table: "My analysis: …" — one line.
 If none: "No active IPOs this week."
 
 ### 6. Your holdings — only if holdings were given
 First line: "Holdings synced from Groww on <date>" (⚠️ if the input says it's stale).
-Table only for holdings **with a filing, flag, breakdown or news**: **Stock · Your P&L · Action · Analysis & proof** (🟢 Hold / Watch / 🔴 Exit; P&L % from the average price and the scan close). Then one line: "No material news: …" for the rest.
+Table only for holdings **with a filing, flag, breakdown, news or a 90-day anchor unlock** (from the input): **Stock · Your P&L · Action · Analysis & proof** (🟢 Hold / Watch / 🔴 Exit; P&L % from the average price and the scan close). Then one line: "No material news: …" for the rest.
 
 ### 7. Multibagger & value watch — weekly mode only
 3–5 growth and up to 3 value ideas from `market-multibagger`. Table **Stock · Buy zone · Numbers · Analysis & proof**. Numbers = 3y sales / profit growth, ROE, debt, P/E (e.g. "Sales 28% · Profit 41% · ROE 22% · Debt 0.1 · P/E 34"). Analysis & proof = thesis + main risk, [Screener] + [chart].

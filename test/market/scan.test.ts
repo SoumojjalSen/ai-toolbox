@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseBhavcopy, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, type BhavcopyRow } from "./services/marketScan.js"
+import { parseBhavcopy, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, type BhavcopyRow } from "../../src/services/market/scan.js"
 
 function makeSession(close: number, volume: number, overrides: Partial<BhavcopyRow> = {}): BhavcopyRow {
   return { symbol: "ACME", prevClose: close, open: close, high: close + 1, low: close - 1, close, volume, turnoverLacs: 100, deliveryPercent: 40, ...overrides }

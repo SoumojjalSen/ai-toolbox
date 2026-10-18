@@ -1,9 +1,9 @@
-import { loadStockSignals, type BhavcopyRow } from "./marketScan.js"
+import { loadStockSignals, type BhavcopyRow } from "./scan.js"
 import { scorePick, buildTrackRecord, type ReportPick } from "./scorecard.js"
 import { readHoldings } from "./holdings.js"
-import { readJson, listJson, todayIst, nseDate } from "./marketStore.js"
-import type { MoverAlert, MoveLabel } from "./marketAlert.js"
-import { convertMarkdownToEmailHtml } from "../formats.js"
+import { readJson, listJson, todayIst, nseDate } from "./store.js"
+import type { MoverAlert, MoveLabel } from "./alert.js"
+import { convertMarkdownToEmailHtml } from "../../formats.js"
 
 // Evening scorecard (~19:30, after NSE publishes the day's bhavcopy) — code only. Checks today's report picks,
 // the running track record, and whether the market-check labels ("likely to fade", "news-backed"…) were right,

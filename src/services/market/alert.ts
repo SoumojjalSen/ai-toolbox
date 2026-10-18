@@ -1,10 +1,11 @@
 import { fetchNse, fetchNseJson } from "./nse.js"
-import { loadStockSignals, type StockSignal } from "./marketScan.js"
-import { fetchMarketLenses, type CompanyEvent, type EventKind } from "./marketLenses.js"
+import { loadStockSignals, type StockSignal } from "./scan.js"
+import { fetchMarketLenses, type CompanyEvent, type EventKind } from "./lenses.js"
 import { readHoldings } from "./holdings.js"
-import { readJson, writeJson, todayIst, nseDate } from "./marketStore.js"
+import { buildIpoClosingToday } from "./ipo.js"
+import { readJson, writeJson, todayIst, nseDate } from "./store.js"
 import type { ReportPick } from "./scorecard.js"
-import { convertMarkdownToEmailHtml } from "../formats.js"
+import { convertMarkdownToEmailHtml } from "../../formats.js"
 
 // Market check at 10:00 and 14:00 — code only, no AI. Chosen from 5-minute data on 1,100 stocks (13–16 Oct):
 // 10:00 + 14:00 caught 91% of the day's ≥5% moves vs 37% for 9:30 alone, and 10:00 is when the opening swings
@@ -211,6 +212,9 @@ export async function buildMoverAlert(): Promise<MoverAlert> {
       }),
     )
   }
+  // the closing-day apply/skip needs the afternoon QIB number — QIB money mostly comes in on the last day
+  const ipoRows = hhmm >= "13:00" ? await buildIpoClosingToday() : []
+  sections.push(...ipoRows)
   if (holdingRows.length) {
     sections.push(
       `## Your holdings moving ≥${HOLDING_MOVE_PERCENT}%`, "| Stock | Move | Why |", "|---|---|---|",
@@ -246,6 +250,7 @@ export async function buildMoverAlert(): Promise<MoverAlert> {
   ].join("\n\n")
 
   await writeJson(runsFile, [...earlierRuns, { time: hhmm, rows: [...ups, ...downs].map(({ quote, label }) => ({ symbol: quote.symbol, price: quote.price, changePercent: quote.changePercent, label })) }])
-  const count = reportPicks.length + holdingRows.length + ups.length + downs.length
-  return { count, subject: `📈 Market check ${hhmm} — ${ups.length + downs.length} movers${reportPicks.length ? ", today's picks: buy or skip" : ""}`, html: convertMarkdownToEmailHtml(markdown) }
+  const ipoCount = Math.max(0, ipoRows.length - 3) // minus the heading and table header rows
+  const count = reportPicks.length + holdingRows.length + ups.length + downs.length + ipoCount
+  return { count, subject: `📈 Market check ${hhmm} — ${ups.length + downs.length} movers${reportPicks.length ? ", today's picks: buy or skip" : ""}${ipoCount ? ", IPOs closing today" : ""}`, html: convertMarkdownToEmailHtml(markdown) }
 }

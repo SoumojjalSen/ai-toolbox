@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { convertMarkdownToEmailHtml } from "./formats.js"
+import { convertMarkdownToEmailHtml } from "../src/formats.js"
 
 test("convertMarkdownToEmailHtml: detail rows, colors, callouts, raw HTML", () => {
   const html = convertMarkdownToEmailHtml(

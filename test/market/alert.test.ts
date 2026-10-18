@@ -1,10 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { selectMovers, labelMove, pickExplainingHeadline, shortCompanyName, buyOrSkip, expectedVolumeShare, type LiveQuote } from "./services/marketAlert.js"
-import { labelWasRight } from "./services/marketReview.js"
-import { parseReportPicks } from "./services/scorecard.js"
-import type { StockSignal } from "./services/marketScan.js"
-import type { CompanyEvent } from "./services/marketLenses.js"
+import { selectMovers, labelMove, pickExplainingHeadline, shortCompanyName, buyOrSkip, expectedVolumeShare, type LiveQuote } from "../../src/services/market/alert.js"
+import { labelWasRight } from "../../src/services/market/review.js"
+import { parseReportPicks } from "../../src/services/market/scorecard.js"
+import type { StockSignal } from "../../src/services/market/scan.js"
+import type { CompanyEvent } from "../../src/services/market/lenses.js"
 
 const signal = (symbol: string, avgVolume20: number) => ({ symbol, avgVolume20 }) as StockSignal
 const quote = (symbol: string, changePercent: number, gapPercent: number, volume: number, valueCr = 50): LiveQuote =>
