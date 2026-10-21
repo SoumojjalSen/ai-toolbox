@@ -6,7 +6,7 @@ import { parseReportPicks } from "../../src/services/market/scorecard.js"
 import type { StockSignal } from "../../src/services/market/scan.js"
 import type { CompanyEvent } from "../../src/services/market/lenses.js"
 
-const signal = (symbol: string, avgVolume20: number) => ({ symbol, avgVolume20 }) as StockSignal
+const signal = (symbol: string, averageVolume20Day: number) => ({ symbol, averageVolume20Day }) as StockSignal
 const quote = (symbol: string, changePercent: number, gapPercent: number, volume: number, valueCr = 50): LiveQuote =>
   ({ symbol, price: 100, changePercent, gapPercent, volume, valueCr })
 const event = (kind: CompanyEvent["kind"]): CompanyEvent => ({ symbol: "X", kind, time: "", headline: "", link: "" })
@@ -31,14 +31,14 @@ test("selectMovers compares volume with what's normal by this time; keeps thin s
   assert.deepEqual(withEtfAndBe.map((mover) => mover.quote.symbol), ["HOT"])
 })
 
-test("labelMove: ex-date, bad news, opening gaps and newsless up-moves", () => {
-  assert.equal(labelMove(quote("X", -10, -7, 1), [], "Special Dividend - Rs 21", 2), "not a real move")
-  assert.equal(labelMove(quote("X", -6, -1, 1), [event("regulatory")], undefined, 3), "bad news, may continue")
-  assert.equal(labelMove(quote("X", 8, 1, 1), [], undefined, 3), "likely to fade") // up, no news
-  assert.equal(labelMove(quote("X", 10, 9, 1), [event("results")], undefined, 3), "likely to fade") // mostly an opening gap
-  assert.equal(labelMove(quote("X", 8, 2, 1), [event("order")], undefined, 3), "news-backed")
-  assert.equal(labelMove(quote("X", 8, 2, 1), [event("order")], undefined, 60), "likely to fade") // volume climax
-  assert.equal(labelMove(quote("X", -6, -1, 1), [], undefined, 3), "falling, no news found")
+test("labelMove: ex-date, bad news, news found, nothing found — no fade predictions", () => {
+  assert.equal(labelMove(quote("X", -10, -7, 1), [], "Special Dividend - Rs 21", false), "not a real move")
+  assert.equal(labelMove(quote("X", -6, -1, 1), [event("regulatory")], undefined, false), "bad news, may continue")
+  assert.equal(labelMove(quote("X", -6, -1, 1), [event("results")], undefined, false), "bad news, may continue")
+  assert.equal(labelMove(quote("X", 8, 1, 1), [], undefined, false), "no news found")
+  assert.equal(labelMove(quote("X", 10, 9, 1), [event("results")], undefined, false), "news-backed")
+  assert.equal(labelMove(quote("X", 8, 2, 1), [], undefined, true), "news-backed") // a headline about the company
+  assert.equal(labelMove(quote("X", -6, -1, 1), [event("price-move query")], undefined, false), "no news found")
 })
 
 test("pickExplainingHeadline skips headlines that only restate the move", () => {
@@ -46,11 +46,20 @@ test("pickExplainingHeadline skips headlines that only restate the move", () => 
   assert.equal(pickExplainingHeadline(["Viviana Power Tech Share Price and Technical View - Kalkine"], "Viviana Power Tech"), undefined)
   assert.equal(pickExplainingHeadline(["Amal Clooney Radiates in a Mint Green Top - InStyle"], "Amal"), undefined)
   assert.equal(pickExplainingHeadline(["SBI Banking & Financial Services Fund(G)-Direct Plan - Univest"], shortCompanyName("SBI Funds Management Limited")), undefined)
+  // 19–21 Oct misses: a beach-soccer result, stock lists, a story about another company
+  assert.equal(pickExplainingHeadline(["Amal Mogador v Rostocker Robben results, H2H stats | Beach soccer - Flashscore UK"], "Amal"), undefined)
+  assert.equal(pickExplainingHeadline(["Buzzing Stocks: Infosys jumps 2% on Truist collaboration; Sobha, SML Mahindra, Just Dial fall 3-8% after... - Moneycontrol.com"], "SML Mahindra"), undefined)
+  assert.equal(pickExplainingHeadline(["Buy, Sell Or Hold: TCS Asian Paints, Tata Motors PV, Coforge, Welspun Corp | Ask Profit - NDTV Profit"], "Tata Motors"), undefined)
+  assert.equal(pickExplainingHeadline(["Price Action: Transrail Lighting jumps 5% on stake acquisition; L&T Technology Services surges - ET"], "L&T Technology"), undefined)
+  assert.equal(pickExplainingHeadline(["99% work done on trade deal, tariffs and visa curbs not targeted at India: US Secretary - ET"], shortCompanyName("The India Cements Limited")), undefined)
+  // still accepted: a story about the company
+  assert.equal(pickExplainingHeadline(["Nomura names Piramal Finance top NBFC pick as Q2 profit jumps 67% - ET"], "Piramal Finance"), "Nomura names Piramal Finance top NBFC pick as Q2 profit jumps 67% - ET")
+  assert.equal(shortCompanyName("The India Cements Limited"), "India Cements")
 })
 
 test("buyOrSkip: buy zone is entry to entry + half the risk; skip above it, below the stop, or on bad news", () => {
   const pick = { symbol: "X", entry: 100, target: 130, stopLoss: 90 }
-  assert.match(buyOrSkip(pick, quote("X", 1, 0, 1), false), /^✅ buy zone/)
+  assert.match(buyOrSkip(pick, quote("X", 1, 0, 1), false), /^✅ buy —/)
   assert.match(buyOrSkip(pick, { ...quote("X", 6, 0, 1), price: 106 }, false), /^❌ above ₹105/)
   assert.match(buyOrSkip(pick, { ...quote("X", -11, 0, 1), price: 89 }, false), /^❌ below the stop/)
   assert.match(buyOrSkip(pick, quote("X", 1, 0, 1), true), /bad news/)

@@ -17,6 +17,10 @@ test("classifyAnnouncement tags market-moving filings and ignores routine ones",
     ["Resignation of Director/KMP/SMP", "Cessation of Ms Y as Non-Executive Independent Director", undefined],
     ["Shareholders meeting", "Notice of AGM", undefined],
     ["Allotment of Securities", "Allotment of 1,200 shares under ESOP scheme", undefined],
+    ["Board Meeting Intimation", "Board meeting to be held on 29-Oct-2026 to consider and approve the financial results for the quarter", "results date"],
+    ["Rights Issue", "Board of Directors has decided to issue equity shares on a rights basis", "fund raise"],
+    ["General Updates", "Letter of Offer for Right Issue.", "fund raise"],
+    ["Updates", "Revised finacial result after removing typographical error as observed by NSE", "governance"],
     ["Certificate under SEBI (Depositories and Participants) Regulations, 2018", "Certificate for the quarter", undefined],
   ]
   for (const [desc, attchmntText, expected] of cases) assert.equal(classifyAnnouncement({ desc, attchmntText }), expected, attchmntText)

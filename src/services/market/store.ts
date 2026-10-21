@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "fs/promises"
+import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises"
 import { dirname, join } from "path"
 
 // JSON files under the data volume (/data/market on the VM): picks, report picks, alert runs — what the
@@ -14,6 +14,24 @@ export async function writeJson(name: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true }).then(() => writeFile(path, JSON.stringify(value, null, 1))).catch(() => {})
 }
 
+// Raw files (NSE's daily price CSVs) — same folder rules as the JSON files
+export async function readText(name: string): Promise<string | undefined> {
+  return readFile(join(DATA_DIR, name), "utf8").catch(() => undefined)
+}
+
+export async function writeText(name: string, text: string): Promise<void> {
+  const path = join(DATA_DIR, name)
+  await mkdir(dirname(path), { recursive: true }).then(() => writeFile(path, text)).catch(() => {})
+}
+
+export async function listFiles(folder: string): Promise<string[]> {
+  return (await readdir(join(DATA_DIR, folder)).catch(() => [] as string[])).sort()
+}
+
+export async function deleteFile(name: string): Promise<void> {
+  await unlink(join(DATA_DIR, name)).catch(() => {})
+}
+
 export async function listJson(folder: string): Promise<string[]> {
   return (await readdir(join(DATA_DIR, folder)).catch(() => [] as string[])).filter((file) => file.endsWith(".json")).sort()
 }
@@ -26,7 +44,7 @@ export function todayIst(): string {
 // "16-Oct-2026" — how NSE prints dates (IST)
 export function nseDate(date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }).formatToParts(date)
-  const part = (type: string) => parts.find((p) => p.type === type)?.value
+  const part = (type: string) => parts.find((part) => part.type === type)?.value
   return `${part("day")}-${part("month")}-${part("year")}`
 }
 

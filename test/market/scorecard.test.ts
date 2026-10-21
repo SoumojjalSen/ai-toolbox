@@ -3,14 +3,14 @@ import assert from "node:assert/strict"
 import { mkdtempSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
-import type { BhavcopyRow } from "../../src/services/market/scan.js"
+import type { DailyPriceRow } from "../../src/services/market/scan.js"
 
 process.env.MARKET_DATA_DIR = mkdtempSync(join(tmpdir(), "scorecard-"))
 const { scorePick, recordPicks, buildTrackRecord } = await import("../../src/services/market/scorecard.js")
 
-const bar = (open: number, high: number, low: number, close: number, symbol = "ACME"): BhavcopyRow =>
-  ({ symbol, prevClose: open, open, high, low, close, volume: 1000, turnoverLacs: 100, deliveryPercent: 40 })
-const pick = { symbol: "ACME", entry: 100, stopLoss: 90, target: 130, rsRank: 95, lenses: ["order filing"], regime: "strong" }
+const bar = (open: number, high: number, low: number, close: number, symbol = "ACME"): DailyPriceRow =>
+  ({ symbol, prevClose: open, open, high, low, close, volume: 1000, turnoverLakhs: 100, deliveryPercent: 40 })
+const pick = { symbol: "ACME", entry: 100, stopLoss: 90, target: 130, relativeStrengthRank: 95, lenses: ["order filing"], regime: "strong" }
 
 test("scorePick: target, stop (stop wins a same-session tie), open, not entered", () => {
   assert.deepEqual(scorePick(pick, [bar(100, 105, 95, 104), bar(104, 131, 100, 128)]), { status: "target", r: 3 })

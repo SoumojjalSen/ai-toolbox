@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { addTradingDays, parseSubscription, qibVerdict, anchorUnlocks } from "../../src/services/market/ipo.js"
+import { addTradingDays, parseSubscription, qibVerdict, anchorUnlocks, ipoCall } from "../../src/services/market/ipo.js"
 
 const holidays = new Set(["20-Oct-2026"])
 
@@ -33,4 +33,14 @@ test("anchorUnlocks flags holdings ~90 days after allotment", () => {
   const flags = anchorUnlocks(past, new Set(["SBIFUNDS", "OLD"]), holidays, new Date("2026-10-14T03:00:00Z"))
   assert.equal(flags.length, 1)
   assert.ok(flags[0].startsWith("SBIFUNDS: last anchor shares unlock ~15-Oct-2026"))
+})
+
+test("ipoCall: early read applies now only at ≥20×, otherwise apply and wait; the final keeps or cancels", () => {
+  // 19 Oct at 13:54 → final: Tonbo 47× → 294×, Bonfiglioli 14.6× → 121×, Sahajanand 1.6× → 35×, Zetwerk 1.6× → 4.7×
+  assert.equal(ipoCall(47.2, false), "apply now")
+  assert.equal(ipoCall(14.6, false), "apply and wait")
+  assert.equal(ipoCall(undefined, false), "apply and wait")
+  assert.equal(ipoCall(120.8, true), "keep")
+  assert.equal(ipoCall(34.7, true), "keep")
+  assert.equal(ipoCall(4.7, true), "cancel")
 })

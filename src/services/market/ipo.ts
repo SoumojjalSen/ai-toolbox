@@ -1,9 +1,10 @@
 import { fetchNseJson } from "./nse.js"
-import { nseDate, parseNseDate } from "./store.js"
+import { nseDate, parseNseDate, writeJson, todayIst } from "./store.js"
+import { convertMarkdownToEmailHtml } from "../../formats.js"
 
 // IPO facts from NSE's own pages — official, combined NSE + BSE subscription by category. The web sites the agent
 // used (Chittorgarh, IPO Central) came back empty or blocked on every run, and the blogs disagreed with each other.
-// Tested on 174 mainboard IPOs listed Jul 2025 → Oct 2026 (NSE subscription + bhavcopy):
+// Tested on 174 mainboard IPOs listed Jul 2025 → Oct 2026 (NSE subscription + daily prices):
 // - Final QIB (big-institution) subscription is the best predictor of the listing price:
 //   under 20×: median listing gain 0%, 35 of 75 listed below the issue price; 20× or more: median +17%, 5 of 99 below.
 //   Retail demand above QIB demand: median +0.3%.
@@ -57,10 +58,10 @@ export function parseSubscription(rows: NseCategoryRow[], updated: string): Subs
     return Number.isFinite(value) && value > 0 ? value : undefined
   }
   return {
-    qib: times((c) => c.startsWith("Qualified Institutional")),
-    nii: times((c) => c === "Non Institutional Investors"),
-    retail: times((c) => c.startsWith("Retail Individual")),
-    total: times((c) => c === "Total"),
+    qib: times((category) => category.startsWith("Qualified Institutional")),
+    nii: times((category) => category === "Non Institutional Investors"),
+    retail: times((category) => category.startsWith("Retail Individual")),
+    total: times((category) => category === "Total"),
     updated: updated.replace("Updated as on ", ""),
   }
 }
@@ -73,8 +74,8 @@ export function qibVerdict(qib: number | undefined, isFinal: boolean): string {
 }
 
 const formatTimes = (value?: number) => (value === undefined ? "—" : `${value.toFixed(value < 10 ? 2 : 1)}×`)
-export const formatSubscription = (s: Subscription) =>
-  `QIB ${formatTimes(s.qib)} · NII ${formatTimes(s.nii)} · Retail ${formatTimes(s.retail)} · Total ${formatTimes(s.total)} (NSE, ${s.updated})`
+export const formatSubscription = (subscription: Subscription) =>
+  `QIB ${formatTimes(subscription.qib)} · NII ${formatTimes(subscription.nii)} · Retail ${formatTimes(subscription.retail)} · Total ${formatTimes(subscription.total)} (NSE, ${subscription.updated})`
 
 async function fetchSubscription(symbol: string): Promise<Subscription | undefined> {
   const data = await fetchNseJson<{ dataList?: NseCategoryRow[]; updateTime?: string }>(`ipo-active-category?symbol=${encodeURIComponent(symbol)}`)
@@ -96,7 +97,7 @@ async function fetchDetail(symbol: string): Promise<Pick<IpoIssue, "lot" | "size
   }
 }
 
-async function fetchHolidays(): Promise<Set<string>> {
+export async function fetchHolidays(): Promise<Set<string>> {
   const data = await fetchNseJson<{ CM?: { tradingDate: string }[] }>("holiday-master?type=trading")
   return new Set((data?.CM ?? []).map((holiday) => holiday.tradingDate))
 }
@@ -146,12 +147,12 @@ export async function buildIpoBrief(holdingSymbols: Set<string>, now = new Date(
   if (!data) return "### IPOs (NSE)\nNSE IPO data unavailable today — market-ipo-research must find dates and subscription itself."
   const today = nseDate(now)
   const lines = data.issues.map((issue) => {
-    const s = issue.subscription
+    const subscription = issue.subscription
     const when = issue.status === "closed" ? `closed ${issue.end}` : `${issue.start} → ${issue.end}${issue.end === today ? " (CLOSES TODAY)" : ""}`
     return [
       `- **${issue.name}** (${issue.symbol}) · ${issue.status} · ${when} · band ${issue.band} · lot ${issue.lot ?? "?"} · **lists ${issue.listing}**${issue.listing === today ? " (TODAY)" : ""}`,
       issue.size ? `  Issue: ${issue.size.slice(0, 220)}` : "",
-      s ? `  Subscription: ${formatSubscription(s)} · ${qibVerdict(s.qib, issue.status === "closed")}` : "  Subscription: not open yet",
+      subscription ? `  Subscription: ${formatSubscription(subscription)} · ${qibVerdict(subscription.qib, issue.status === "closed")}` : "  Subscription: not open yet",
       issue.reservedFor ? `  ⭐ Shareholder quota: ${issue.reservedFor} — they can bid in this quota AND as retail (same PAN), roughly doubling the allotment chance` : "",
       issue.rhp ? `  RHP: ${issue.rhp}` : "",
     ].filter(Boolean).join("\n")
@@ -164,22 +165,58 @@ export async function buildIpoBrief(holdingSymbols: Set<string>, now = new Date(
   ].filter(Boolean).join("\n\n")
 }
 
-// For the 14:00 market check — apply or skip for issues that close today, from the live QIB number. Final QIB only
-// goes up, so ≥20× now is safe; under 20× may still get there, but skipping is the cautious call.
-export async function buildIpoClosingToday(now = new Date()): Promise<string[]> {
+export type IpoCall = "apply now" | "apply and wait" | "keep" | "cancel"
+export interface IpoCallRecord { symbol: string; name: string; time: string; qib?: number; call: IpoCall }
+
+// Closing day, two steps (retail can cancel a bid until 5 PM; QIB bidding closes at 4 PM):
+// 14:00 — QIB ≥ 20× already → apply now (final QIB only goes up). Otherwise apply to hold a place and wait:
+//   on 19 Oct, QIB at 13:54 → final was 14.6× → 121× (Bonfiglioli) and 1.6× → 35× (Sahajanand).
+// 16:15 — QIB is final: ≥ 20× → keep (or apply now), under 20× → cancel before ~4:45 (apps slow down near 5 PM).
+export function ipoCall(qib: number | undefined, isFinal: boolean): IpoCall {
+  const strong = qib !== undefined && qib >= STRONG_QIB
+  if (isFinal) return strong ? "keep" : "cancel"
+  return strong ? "apply now" : "apply and wait"
+}
+
+const CALL_TEXT: Record<IpoCall, (issue: IpoIssue) => string> = {
+  "apply now": (issue) => `🟢 apply now — QIB already ≥${STRONG_QIB}× · lists ${issue.listing} · plan to sell on listing day`,
+  "apply and wait": () => `🟡 apply now to hold your place (unless this morning's report said avoid) — the 16:15 email says keep or cancel from the final QIB`,
+  keep: (issue) => `🟢 keep your bid (or apply now, before ~4:45 PM) — final QIB ≥${STRONG_QIB}× · lists ${issue.listing} · plan to sell on listing day`,
+  cancel: () => `🔴 cancel your bid before ~4:45 PM (retail can cancel until 5 PM) — final QIB under ${STRONG_QIB}×: almost half such IPOs listed below the issue price`,
+}
+
+// The IPO rows for the 14:00 market check (early read) and the 16:15 final; the calls are saved for the scorecard
+export async function buildIpoClosingToday(now = new Date(), isFinal = false): Promise<{ rows: string[]; calls: IpoCallRecord[] }> {
   const data = await fetchIpos(now).catch(() => undefined)
   const closing = (data?.issues ?? []).filter((issue) => issue.status === "open" && issue.end === nseDate(now))
-  if (!closing.length) return []
-  return [
-    `## IPOs closing today — apply or skip`,
-    "| IPO | Subscription now | Decision |", "|---|---|---|",
-    ...closing.map((issue) => {
-      const qib = issue.subscription?.qib
-      const stale = issue.subscription && !issue.subscription.updated.startsWith(nseDate(now)) ? " ⚠️ NSE hasn't updated today — check the live number before applying" : ""
-      const decision = qib !== undefined && qib >= STRONG_QIB
-        ? `🟢 apply before ${issue.upiCutoff ?? "5 PM"} (UPI cut-off) · lists ${issue.listing} · plan to sell on listing day`
-        : `🔴 skip — QIB under ${STRONG_QIB}× so far`
-      return `| ${qib !== undefined && qib >= STRONG_QIB ? "🟢" : "🔴"} **${issue.name}** · ${issue.band} | ${issue.subscription ? formatSubscription(issue.subscription) : "no data"} | ${decision}${stale}${issue.reservedFor ? ` · ⭐ ${issue.reservedFor}` : ""} |`
+  if (!closing.length) return { rows: [], calls: [] }
+  const time = new Date(now.getTime() + 5.5 * 3_600_000).toISOString().slice(11, 16)
+  const calls = closing.map((issue) => ({ symbol: issue.symbol, name: issue.name, time, qib: issue.subscription?.qib, call: ipoCall(issue.subscription?.qib, isFinal) }))
+  const rows = [
+    isFinal ? `## IPOs closing today — final call (QIB bidding closed at 4 PM)` : `## IPOs closing today — early read (final call at 16:15)`,
+    "| IPO | Subscription | Decision |", "|---|---|---|",
+    ...closing.map((issue, index) => {
+      const updated = issue.subscription?.updated ?? ""
+      const stale = !updated.startsWith(nseDate(now)) || (isFinal && updated.slice(12, 14) < "16")
+        ? " ⚠️ NSE's number isn't the latest — check it in your broker app before acting" : ""
+      const call = calls[index].call
+      return `| ${call === "cancel" ? "🔴" : "🟢"} **${issue.name}** · ${issue.band} | ${issue.subscription ? formatSubscription(issue.subscription) : "no data"} | ${CALL_TEXT[call](issue)}${stale}${issue.reservedFor ? ` · ⭐ ${issue.reservedFor}` : ""} |`
     }),
   ]
+  return { rows, calls }
+}
+
+// 16:15 on a closing day: keep or cancel from the final QIB number. Sends nothing on other days.
+export async function buildIpoFinal(now = new Date()): Promise<{ count: number; subject: string; html: string }> {
+  const { rows, calls } = await buildIpoClosingToday(now, true)
+  if (!calls.length) return { count: 0, subject: "", html: "" }
+  await writeJson(`ipo-calls/${todayIst()}-final.json`, calls)
+  const doNow = calls.map((call) => `**${call.name.replace(/ Limited$/, "")}:** ${call.call === "keep" ? "keep your bid (or apply now)" : "cancel your bid"} — final QIB ${call.qib?.toFixed(1) ?? "?"}×`)
+  const markdown = [
+    `# IPO final call — ${nseDate(now)}`,
+    `> 🟢 **Do now — before ~4:45 PM** (retail bids and cancellations close at 5 PM; apps slow down near the end)\n>\n> ${doNow.join("\n>\n> ")}`,
+    rows.join("\n"),
+    `_Rule (174 IPOs, Jul 2025 → Oct 2026): final QIB ≥ ${STRONG_QIB}× → median listing gain +17%, 5 in 99 listed below the issue price; under ${STRONG_QIB}× → median 0%, almost half below._`,
+  ].join("\n\n")
+  return { count: calls.length, subject: `🧾 IPO final call — ${calls.map((call) => `${call.name.replace(/ Limited$/, "").split(" ")[0]}: ${call.call}`).join(", ")}`, html: convertMarkdownToEmailHtml(markdown) }
 }

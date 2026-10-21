@@ -1,7 +1,7 @@
-import type { BhavcopyRow } from "./scan.js"
+import type { DailyPriceRow } from "./scan.js"
 import { readJson, writeJson, listJson, parseNseDate } from "./store.js"
 
-// Every morning's top core setups are saved; later scans score them against the bhavcopy they already hold —
+// Every morning's top core setups are saved; later scans score them against the daily price files they already hold —
 // so the report carries its own live track record, per lens, with no extra job or AI.
 const MAX_HOLD_SESSIONS = 30
 const OPEN_TRADE_DAYS = 45 // ~30 sessions: a symbol picked within this window is still the same open trade
@@ -12,7 +12,7 @@ export interface RecordedPick {
   entry: number
   stopLoss: number
   target: number
-  rsRank: number
+  relativeStrengthRank: number
   lenses: string[] // extra lenses that agreed, e.g. "order filing"
   regime: string
 }
@@ -24,7 +24,7 @@ export interface PickOutcome {
 
 // Same rules as the backtest: enter at the next session's open, keep the planned risk distance, stop first when
 // both levels fall inside one session, sell at the close of the last allowed session.
-export function scorePick(pick: RecordedPick, laterBars: BhavcopyRow[]): PickOutcome {
+export function scorePick(pick: RecordedPick, laterBars: DailyPriceRow[]): PickOutcome {
   if (!laterBars.length) return { status: "open", r: 0 }
   const risk = pick.entry - pick.stopLoss
   const rewardMultiple = (pick.target - pick.entry) / risk
@@ -60,7 +60,7 @@ function describe(label: string, tally: Tally): string {
 }
 
 // sessionDates/sessions: oldest → newest, as the scan holds them
-export async function buildTrackRecord(sessionDates: string[], sessions: BhavcopyRow[][]): Promise<string> {
+export async function buildTrackRecord(sessionDates: string[], sessions: DailyPriceRow[][]): Promise<string> {
   // oldest first, so a symbol repeated on later days (recorded before the dedupe) counts once
   const files = (await listJson("picks")).sort((a, b) => parseNseDate(a.replace(/\.json$/, "")) - parseNseDate(b.replace(/\.json$/, "")))
   const counted = new Map<string, number>() // symbol → session index it was first counted at
@@ -79,7 +79,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
       const firstIndex = counted.get(pick.symbol)
       if (firstIndex !== undefined && index - firstIndex < MAX_HOLD_SESSIONS) continue
       counted.set(pick.symbol, index)
-      const laterBars = sessions.slice(index + 1).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is BhavcopyRow => !!row)
+      const laterBars = sessions.slice(index + 1).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is DailyPriceRow => !!row)
       const outcome = scorePick(pick, laterBars)
       if (outcome.status === "open") { open++; continue }
       if (outcome.status === "not entered") { skipped++; continue }
@@ -104,7 +104,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: Bhavcop
 
 // The report's own swing picks (what the reader actually buys), parsed from its "Swing picks" table:
 // | 🟢 SYMBOL | 🟢 Buy | ₹entry → ₹target · SL ₹stop · by date | … |
-export interface ReportPick { symbol: string; entry: number; target: number; stopLoss: number }
+export interface ReportPick { symbol: string; entry: number; target: number; stopLoss: number; sellBy?: string }
 
 export function parseReportPicks(markdown: string): ReportPick[] {
   const section = markdown.split(/^#+ .*Swing picks.*$/m)[1]?.split(/^#+ /m)[0] ?? ""
@@ -112,6 +112,44 @@ export function parseReportPicks(markdown: string): ReportPick[] {
     const cells = line.split("|").slice(1, -1).map((cell) => cell.trim())
     const symbol = cells[0]?.match(/[A-Z][A-Z0-9&-]+/)?.[0]
     const [entry, target, stopLoss] = [...(cells[2] ?? "").matchAll(/₹\s?([\d,]+(?:\.\d+)?)/g)].map((match) => Number(match[1].replace(/,/g, "")))
-    return symbol && stopLoss < entry && target > entry ? [{ symbol, entry, target, stopLoss }] : []
+    const sellBy = cells[2]?.match(/by\s+(\d{1,2}[\s-][A-Za-z]{3,9}[\s-]\d{4})/)?.[1].replace(/\s+/g, "-")
+    return symbol && stopLoss < entry && target > entry ? [{ symbol, entry, target, stopLoss, ...(sellBy ? { sellBy } : {}) }] : []
   })
+}
+
+// The report ends with a "## Findings log" table — what the news check found per stock (stripped before the email).
+// The next morning's scan shows these to the analyser, so an earlier concern is re-weighed, not forgotten.
+export interface Finding { symbol: string; verdict: string; findings: string }
+
+export function splitFindingsLog(markdown: string): { report: string; findings: Finding[] } {
+  const [report, log = ""] = markdown.split(/^#+ *Findings log.*$/m)
+  const findings = log.split("\n").filter((line) => line.startsWith("|")).flatMap((line) => {
+    const [symbol, verdict, text] = line.split("|").slice(1, -1).map((cell) => cell.trim())
+    return /^[A-Z][A-Z0-9&-]+$/.test(symbol ?? "") && verdict && text ? [{ symbol, verdict, findings: text }] : []
+  })
+  return { report: report.trimEnd(), findings }
+}
+
+// Report picks you now hold (synced holdings): the latest pick of each held symbol in the last ~6 weeks — so the
+// market check and the report can say when its stop, target or sell-by date is reached
+export interface OpenTrade extends ReportPick { pickedOn: string }
+
+export async function findOpenTrades(holdingSymbols: Set<string>, now = Date.now()): Promise<OpenTrade[]> {
+  const trades = new Map<string, OpenTrade>()
+  for (const file of await listJson("report-picks")) {
+    const pickedOn = file.replace(/\.json$/, "")
+    if (now - new Date(`${pickedOn}T00:00:00+05:30`).getTime() > OPEN_TRADE_DAYS * 86_400_000) continue
+    for (const pick of (await readJson<ReportPick[]>(`report-picks/${file}`)) ?? []) {
+      if (holdingSymbols.has(pick.symbol)) trades.set(pick.symbol, { ...pick, pickedOn }) // files are date-sorted: latest wins
+    }
+  }
+  return [...trades.values()]
+}
+
+export function tradeStatus(trade: OpenTrade, price: number, today: number): string {
+  if (price <= trade.stopLoss) return `🔴 stop loss ₹${trade.stopLoss} hit — exit`
+  if (price >= trade.target) return `🟢 target ₹${trade.target} reached — sell`
+  if (trade.sellBy && today > parseNseDate(trade.sellBy)) return `🔴 past the sell-by date (${trade.sellBy}) — sell`
+  const progress = (price - trade.entry) / (trade.target - trade.entry)
+  return `hold · stop ₹${trade.stopLoss} · target ₹${trade.target}${trade.sellBy ? ` · sell by ${trade.sellBy}` : ""} (${progress >= 0 ? `${Math.round(progress * 100)}% of the way to target` : "below entry"})`
 }

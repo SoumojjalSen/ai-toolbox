@@ -1,13 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseBhavcopy, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, type BhavcopyRow } from "../../src/services/market/scan.js"
+import { parseDailyPriceFile, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, type DailyPriceRow } from "../../src/services/market/scan.js"
 
-function makeSession(close: number, volume: number, overrides: Partial<BhavcopyRow> = {}): BhavcopyRow {
-  return { symbol: "ACME", prevClose: close, open: close, high: close + 1, low: close - 1, close, volume, turnoverLacs: 100, deliveryPercent: 40, ...overrides }
+function makeSession(close: number, volume: number, overrides: Partial<DailyPriceRow> = {}): DailyPriceRow {
+  return { symbol: "ACME", prevClose: close, open: close, high: close + 1, low: close - 1, close, volume, turnoverLakhs: 100, deliveryPercent: 40, ...overrides }
 }
 
 // 220 sessions rising by `step` a session with a ±1 wiggle; the last 10 sessions move in a tight ₹0.2 band → Stage 2 + tight
-function tightUptrend(symbol = "ACME", step = 0.5): BhavcopyRow[][] {
+function tightUptrend(symbol = "ACME", step = 0.5): DailyPriceRow[][] {
   const closes = Array.from({ length: 220 }, (_, index) => (index < 210 ? 100 + index * step + (index % 2) : 100 + 209 * step + (index % 2) * 0.2))
   return closes.map((close, index) => {
     const band = index < 210 ? 3 : 0.3
@@ -15,14 +15,14 @@ function tightUptrend(symbol = "ACME", step = 0.5): BhavcopyRow[][] {
   })
 }
 
-test("parseBhavcopy keeps EQ rows and trims padded fields", () => {
+test("parseDailyPriceFile keeps EQ rows and trims padded fields", () => {
   const csvText = [
     "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER",
     "20MICRONS, EQ, 01-Oct-2026, 214.59, 213.00, 214.70, 203.35, 205.35, 207.26, 208.20, 92549, 192.69, 3990, 42666, 46.10",
     "SOMEBE, BE, 01-Oct-2026, 10, 10, 10, 10, 10, 10, 10, 100, 0.01, 1, -, -",
   ].join("\n")
-  assert.deepEqual(parseBhavcopy(csvText), [
-    { symbol: "20MICRONS", prevClose: 214.59, open: 213, high: 214.7, low: 203.35, close: 207.26, volume: 92549, turnoverLacs: 192.69, deliveryPercent: 46.1 },
+  assert.deepEqual(parseDailyPriceFile(csvText), [
+    { symbol: "20MICRONS", prevClose: 214.59, open: 213, high: 214.7, low: 203.35, close: 207.26, volume: 92549, turnoverLakhs: 192.69, deliveryPercent: 46.1 },
   ])
 })
 
@@ -38,7 +38,7 @@ test("computeStockSignals: a volume spike gap-up lands in the gainers, accumulat
 })
 
 test("computeStockSignals drops illiquid stocks and new listings", () => {
-  assert.equal(computeStockSignals(Array.from({ length: 21 }, () => [makeSession(100, 1000, { turnoverLacs: 10 })])).length, 0)
+  assert.equal(computeStockSignals(Array.from({ length: 21 }, () => [makeSession(100, 1000, { turnoverLakhs: 10 })])).length, 0)
   assert.equal(computeStockSignals(Array.from({ length: 3 }, () => [makeSession(100, 1000)])).length, 0)
 })
 
@@ -48,14 +48,14 @@ test("RS rank orders stocks by volatility-adjusted momentum; a tight Stage 2 upt
   const sessions = strong.map((session, index) => [...session, ...weak[index]])
   const signals = computeStockSignals(sessions)
   const bySymbol = new Map(signals.map((s) => [s.symbol, s]))
-  assert.ok(bySymbol.get("STRONG")!.rsRank > bySymbol.get("WEAK")!.rsRank)
+  assert.ok(bySymbol.get("STRONG")!.relativeStrengthRank > bySymbol.get("WEAK")!.relativeStrengthRank)
   assert.equal(bySymbol.get("STRONG")!.isStage2Uptrend, true)
-  assert.equal(bySymbol.get("STRONG")!.isTight, true)
+  assert.equal(bySymbol.get("STRONG")!.isTightRange, true)
 
   const setup = buildSwingSetup(bySymbol.get("STRONG")!)!
   assert.equal(setup.kind, "core")
   const risk = setup.entry - setup.stopLoss
-  assert.ok(Math.abs(risk - 2 * bySymbol.get("STRONG")!.atr14) < 0.1)
+  assert.ok(Math.abs(risk - 2 * bySymbol.get("STRONG")!.averageDailyRange) < 0.1)
   assert.ok(Math.abs((setup.target - setup.entry) / risk - 3) < 0.05)
   assert.equal(rankSwingSetups(signals)[0].symbol, "STRONG")
 })

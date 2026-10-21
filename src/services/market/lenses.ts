@@ -2,12 +2,12 @@ import { fetchNse, fetchNseJson } from "./nse.js"
 import { nseDate } from "./store.js"
 
 // NSE data lenses beyond price/volume: company filings, big-shareholder deals, corporate actions, and the
-// lists that veto a pick (surveillance, F&O ban, results due). Each fetch is optional — a failed NSE call
-// leaves that lens empty, never breaks the scan.
+// lists that veto a pick (surveillance, F&O ban, results due). A failed NSE call never breaks the scan, but it
+// is listed in `unavailable` — an empty list from a failed call must never read as "none" (e.g. "no vetoes").
 
 export type EventKind =
   | "regulatory" | "management exit" | "corporate action" | "results" | "order" | "rating change" | "fund raise"
-  | "expansion" | "price-move query" | "press release"
+  | "expansion" | "price-move query" | "press release" | "governance" | "pledge" | "results date"
 
 export interface CompanyEvent {
   symbol: string
@@ -35,6 +35,7 @@ export interface MarketLenses {
   cautions: Map<string, string> // symbol → flag that doesn't block a cash swing trade (ASM stage I, F&O ban)
   resultsSoon: Map<string, string> // symbol → results date (next ~3 days)
   exToday: Map<string, string> // symbol → corporate action going ex today (dividend, split…) — its price drop isn't a real move
+  unavailable: string[] // sources NSE didn't return today, e.g. "surveillance lists (GSM)"
 }
 
 // NSE's own filing category decides first; for generic categories ("Updates", "Outcome of Board Meeting") the
@@ -44,19 +45,23 @@ const CATEGORY_RULES: [EventKind, RegExp][] = [
   ["corporate action", /acquisition|amalgamation|merger|scheme of arrangement|sale or disposal|open offer|buyback|restructuring|takeover/i],
   ["order", /bagging|receiving of orders|awarding of order/i],
   ["rating change", /credit rating- revision/i],
-  ["fund raise", /qualified institutional placement|issue of securities/i],
+  ["fund raise", /qualified institutional placement|issue of securities|rights issue|preferential issue|warrants/i],
+  ["pledge", /encumbrance|pledge/i],
   ["expansion", /capacity addition|commencement of commercial production|new line\(s\) of business/i],
   ["price-move query", /spurt in volume|price movement|news verification|rumour verification/i],
 ]
 const TEXT_RULES: [EventKind, RegExp][] = [
+  // restated numbers or auditor trouble — often harmless (a typo fix), so it's for the news check to read
+  ["governance", /revised\s+\w*\s*results?|restat(ed|ement)|qualified opinion|emphasis of matter|forensic audit|auditor.*(resign|cessation)/i],
   ["regulatory", /search and seizure|income tax search|raid|penalt|show[- ]cause|demand order|tax demand|enforcement directorate|sebi order/i],
   // only the people who run the company or sign its accounts — independent/nominee director exits are routine
   ["management exit", /(resign|cessation).*(chief executive|\bceo\b|managing director|chief financial|\bcfo\b|statutory auditor|chairman)|(chief executive|\bceo\b|managing director|chief financial|\bcfo\b|statutory auditor|chairman).*(resign|cessation)/i],
   ["corporate action", /demerger|scheme of arrangement|amalgamation|merger|buy[- ]?back|open offer|delist|draft red herring|\bdrhp\b|initial public offer|offer for sale|stake sale|divest|acquisition of|acquire[sd]? /i],
+  ["results date", /intimation.*results|(to|will) (consider|approve).*results|board meeting.*to be held.*results/i],
   ["results", /financial results|unaudited results|audited results|quarterly results/i],
   ["order", /\border(s)? (worth|valued|of rs|received|from)|work order|purchase order|letter of award|\bloa\b|letter of intent|bagged|secured (an? )?(order|contract)|contract (worth|valued|from)/i],
   ["rating change", /rating.*(upgrade|downgrade)|(upgrade|downgrade).*rating/i],
-  ["fund raise", /qualified institutions? placement|\bqip\b|preferential (issue|allotment)|rights issue|fund ?raising/i],
+  ["fund raise", /qualified institutions? placement|\bqip\b|preferential (issue|allotment)|rights? issue|letter of offer|warrants|fccb|fund ?raising/i],
 ]
 // Routine filings that never move a stock
 const IGNORED_CATEGORIES = /allotment of securities|esop|esos|certificate under|trading window|newspaper|copy of|loss of share|duplicate share|investor (meet|presentation)|analysts\/institutional|shareholders meeting|record date|structural digital|corrigendum|company secretary|^appointment|change in director|demise|retirement|dividend|integrated filing- governance|statement of deviation|committee meeting/i
@@ -83,8 +88,25 @@ function parseNseTime(text: string): Date {
   return new Date(`${day} ${month} ${year} ${time} GMT+0530`)
 }
 
-async function fetchAnnouncements(fromDate: Date, toDate: Date): Promise<NseAnnouncement[]> {
-  return (await fetchNseJson<NseAnnouncement[]>(`corporate-announcements?index=equities&from_date=${formatNseDate(fromDate)}&to_date=${formatNseDate(toDate)}`)) ?? []
+async function fetchAnnouncements(fromDate: Date, toDate: Date, symbol?: string): Promise<NseAnnouncement[] | undefined> {
+  return fetchNseJson<NseAnnouncement[]>(`corporate-announcements?index=equities${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}&from_date=${formatNseDate(fromDate)}&to_date=${formatNseDate(toDate)}`)
+}
+
+const headlineOf = (announcement: NseAnnouncement) =>
+  (announcement.attchmntText ?? announcement.desc).replace(/\s+/g, " ").replace(/^.*? has (informed|submitted to) the Exchange,? (about |regarding |that )?/i, "")
+
+export interface Filing { time: string; kind: EventKind; headline: string; link: string }
+
+// A company's last 90 days of material NSE filings — what the news check must read. The 24-hour event list
+// missed SMLMAH's results (profit −43%, filed 2 days before it was picked) and RATNAVEER's rights issue (2 months
+// earlier). undefined = NSE didn't answer.
+export async function fetchFilingHistory(symbol: string, now = new Date(), days = 90): Promise<Filing[] | undefined> {
+  const announcements = await fetchAnnouncements(new Date(now.getTime() - days * 86_400_000), now, symbol)
+  if (!announcements) return undefined
+  return announcements.flatMap((announcement) => {
+    const kind = classifyAnnouncement(announcement)
+    return kind ? [{ time: announcement.an_dt, kind, headline: headlineOf(announcement).slice(0, 120), link: announcement.attchmntFile ?? "" }] : []
+  }).slice(0, 12)
 }
 
 interface NseSastRow { symbol: string; acqSaleType: string; acquisitionMode: string; acquirerName: string; promoterType: string; totAcqShare: string | null; totSaleShare: string | null; acquirerDate: string }
@@ -94,9 +116,9 @@ interface NseCalendarRow { symbol: string; purpose: string; date: string }
 
 export async function fetchMarketLenses(now = new Date()): Promise<MarketLenses> {
   const daysFromNow = (days: number) => new Date(now.getTime() + days * 86_400_000)
-  const [announcements, sast, corporateActions, asm, gsm, banResponse, calendar] = await Promise.all([
+  const [announcements, shareholderDealRows, corporateActions, additionalSurveillance, gradedSurveillance, derivativesBanFile, calendar] = await Promise.all([
     fetchAnnouncements(daysFromNow(-7), now),
-    fetchNseJson<{ data?: NseSastRow[] }>("corporate-sast-reg29?index=equities"),
+    fetchNseJson<{ data?: NseSastRow[] }>("corporate-shareholderDealRows-reg29?index=equities"),
     fetchNseJson<NseCorporateAction[]>(`corporates-corporateActions?index=equities&from_date=${formatNseDate(daysFromNow(-3))}&to_date=${formatNseDate(daysFromNow(30))}`),
     fetchNseJson<{ longterm?: { data?: NseSurveillanceRow[] }; shortterm?: { data?: NseSurveillanceRow[] } }>("reportASM"),
     fetchNseJson<NseSurveillanceRow[]>("reportGSM"),
@@ -108,20 +130,20 @@ export async function fetchMarketLenses(now = new Date()): Promise<MarketLenses>
   const eventCutoff = daysFromNow(now.getUTCDay() === 1 ? -3 : -1.2)
   const events: CompanyEvent[] = []
   const resultsLastWeek = new Map<string, string>()
-  for (const announcement of announcements) {
+  for (const announcement of announcements ?? []) {
     const kind = classifyAnnouncement(announcement)
     if (!kind) continue
     if (kind === "results" && !resultsLastWeek.has(announcement.symbol)) resultsLastWeek.set(announcement.symbol, announcement.an_dt)
     if (parseNseTime(announcement.an_dt) < eventCutoff) continue
     events.push({
       symbol: announcement.symbol, kind, time: announcement.an_dt,
-      headline: (announcement.attchmntText ?? announcement.desc).replace(/\s+/g, " ").replace(/^.*? has (informed|submitted to) the Exchange,? (about |regarding |that )?/i, "").slice(0, 130),
+      headline: headlineOf(announcement).slice(0, 130),
       link: announcement.attchmntFile ?? "",
     })
   }
 
   // Open-market buys/sells by ≥5% holders and promoters (SAST Reg 29); inter-se transfers and gifts move nothing
-  const deals: ShareholderDeal[] = (sast?.data ?? [])
+  const deals: ShareholderDeal[] = (shareholderDealRows?.data ?? [])
     .filter((row) => /market/i.test(row.acquisitionMode))
     .map((row) => {
       const side = row.acqSaleType === "Acquisition" ? "buy" as const : "sell" as const
@@ -141,13 +163,13 @@ export async function fetchMarketLenses(now = new Date()): Promise<MarketLenses>
   // ASM stage I (100% margin) and the F&O ban don't stop a cash delivery trade — they're cautions.
   const vetoes = new Map<string, string>()
   const cautions = new Map<string, string>()
-  for (const row of [...(asm?.longterm?.data ?? []), ...(asm?.shortterm?.data ?? [])]) {
+  for (const row of [...(additionalSurveillance?.longterm?.data ?? []), ...(additionalSurveillance?.shortterm?.data ?? [])]) {
     const description = row.survDesc ?? "ASM surveillance"
     if (/stage i$/i.test(description.trim())) cautions.set(row.symbol, `${description} — no leverage, volatile`)
     else vetoes.set(row.symbol, description)
   }
-  for (const row of gsm ?? []) vetoes.set(row.symbol, row.survDesc ?? "GSM surveillance")
-  const banCsv = banResponse?.ok ? await banResponse.text() : ""
+  for (const row of gradedSurveillance ?? []) vetoes.set(row.symbol, row.survDesc ?? "GSM surveillance")
+  const banCsv = derivativesBanFile?.ok ? await derivativesBanFile.text() : ""
   for (const line of banCsv.split("\n").slice(1)) {
     const symbol = line.split(",")[1]?.trim()
     if (symbol) cautions.set(symbol, "F&O ban — derivatives crowded (open interest > 95% of the limit)")
@@ -165,5 +187,10 @@ export async function fetchMarketLenses(now = new Date()): Promise<MarketLenses>
   const exToday = new Map<string, string>()
   for (const action of corporateActions ?? []) if (action.exDate === today) exToday.set(action.symbol, action.subject)
 
-  return { events, resultsLastWeek, deals, specialSituations, vetoes, cautions, resultsSoon, exToday }
+  // undefined = NSE didn't answer (an empty answer is a real "none")
+  const unavailable = ([
+    [announcements, "company filings"], [shareholderDealRows, "big-shareholder deals (SAST)"], [corporateActions, "corporate actions (ex-dates, special situations)"],
+    [additionalSurveillance, "surveillance list (ASM)"], [gradedSurveillance, "surveillance list (GSM)"], [derivativesBanFile?.ok ? true : undefined, "F&O ban list"], [calendar, "results calendar"],
+  ] as const).filter(([data]) => data === undefined).map(([, name]) => name)
+  return { events, resultsLastWeek, deals, specialSituations, vetoes, cautions, resultsSoon, exToday, unavailable }
 }
