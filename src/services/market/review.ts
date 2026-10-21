@@ -39,7 +39,7 @@ async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[
 
   // 1. picks that fell ≥5% within 2 sessions — was there a filing before the pick that the news check missed?
   // Falls with no filing behind them are usually the market (on a weak day most picks fall) — one line, not a card each.
-  const marketFalls: string[] = []
+  const marketFalls = new Map<string, number>() // symbol → worst fall (a stock picked on two days is listed once)
   for (const file of await listJson("report-picks")) {
     const pickedOn = file.replace(/\.json$/, "")
     const index = sessionIndexOf(pickedOn)
@@ -51,11 +51,11 @@ async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[
       if (worst > FAST_FAILURE_PERCENT) continue
       const pickTime = new Date(`${pickedOn}T08:00:00+05:30`)
       const filings = ((await fetchFilingHistory(pick.symbol, pickTime, 10)) ?? []).slice(0, 3)
-      if (!filings.length) { marketFalls.push(`${pick.symbol} ${sign(worst)}`); continue }
+      if (!filings.length) { marketFalls.set(pick.symbol, Math.min(worst, marketFalls.get(pick.symbol) ?? 0)); continue }
       checks.push(`| 🔴 **${pick.symbol}** picked ${pickedOn} | fell ${sign(worst)} vs entry within 2 sessions | filed before the pick: ${filings.map((filing) => `${filing.time.slice(0, 11)} ${filing.kind}: ${tableCell(filing.headline.slice(0, 60))}${filing.link ? ` [NSE](${filing.link})` : ""}`).join("; ")} — did the news check read it? |`)
     }
   }
-  if (marketFalls.length) checks.push(`| **${marketFalls.length} picks fell with the market** | ${[...new Set(marketFalls)].join(", ")} | no NSE filing before them — a market or sector fall, not a missed check |`)
+  if (marketFalls.size) checks.push(`| **${marketFalls.size} picks fell with the market** | ${[...marketFalls].map(([symbol, fall]) => `${symbol} ${sign(fall)}`).join(", ")} | no NSE filing before them — a market or sector fall, not a missed check |`)
 
   // 2. stocks picked today that an earlier check dropped — the report must have said why it changed its mind
   const todaysPicks = (await readJson<ReportPick[]>(`report-picks/${todayIst()}.json`)) ?? []
