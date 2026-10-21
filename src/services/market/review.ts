@@ -38,6 +38,8 @@ async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[
   const barOf = (index: number, symbol: string) => sessions[index]?.find((row) => row.symbol === symbol)
 
   // 1. picks that fell ≥5% within 2 sessions — was there a filing before the pick that the news check missed?
+  // Falls with no filing behind them are usually the market (on a weak day most picks fall) — one line, not a card each.
+  const marketFalls: string[] = []
   for (const file of await listJson("report-picks")) {
     const pickedOn = file.replace(/\.json$/, "")
     const index = sessionIndexOf(pickedOn)
@@ -49,9 +51,11 @@ async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[
       if (worst > FAST_FAILURE_PERCENT) continue
       const pickTime = new Date(`${pickedOn}T08:00:00+05:30`)
       const filings = ((await fetchFilingHistory(pick.symbol, pickTime, 10)) ?? []).slice(0, 3)
-      checks.push(`| 🔴 **${pick.symbol}** picked ${pickedOn} | fell ${sign(worst)} vs entry within 2 sessions | ${filings.length ? `filed before the pick: ${filings.map((filing) => `${filing.time.slice(0, 11)} ${filing.kind}: ${tableCell(filing.headline.slice(0, 60))}${filing.link ? ` [NSE](${filing.link})` : ""}`).join("; ")} — did the news check read it?` : "no NSE filing in the 10 days before — market or sector move?"} |`)
+      if (!filings.length) { marketFalls.push(`${pick.symbol} ${sign(worst)}`); continue }
+      checks.push(`| 🔴 **${pick.symbol}** picked ${pickedOn} | fell ${sign(worst)} vs entry within 2 sessions | filed before the pick: ${filings.map((filing) => `${filing.time.slice(0, 11)} ${filing.kind}: ${tableCell(filing.headline.slice(0, 60))}${filing.link ? ` [NSE](${filing.link})` : ""}`).join("; ")} — did the news check read it? |`)
     }
   }
+  if (marketFalls.length) checks.push(`| **${marketFalls.length} picks fell with the market** | ${[...new Set(marketFalls)].join(", ")} | no NSE filing before them — a market or sector fall, not a missed check |`)
 
   // 2. stocks picked today that an earlier check dropped — the report must have said why it changed its mind
   const todaysPicks = (await readJson<ReportPick[]>(`report-picks/${todayIst()}.json`)) ?? []
@@ -164,14 +168,14 @@ export async function buildEveningScorecard(): Promise<MoverAlert> {
         }
         if (index === sessions.length - 1) {
           alertedToday.add(row.symbol)
-          moversToday++
+          if (row.why !== undefined) moversToday++ // older runs didn't save the reason
           if (row.why && row.why !== "no reason found yet") reasonsFound++
           todayRows.push(`| **${row.symbol}** | ${run.time}: ${sign(row.changePercent)} → close ${sign(dayChange(bar))} | ${row.label}${right === undefined ? "" : right ? " ✅" : " ❌"} |`)
         }
       }
     }
   }
-  if (todayRows.length) blocks.push(markdownTable(`## Market-check movers — how they closed (reason found for ${reasonsFound} of ${moversToday})`, "| Stock | Alert → close | Label |", todayRows))
+  if (todayRows.length) blocks.push(markdownTable(`## Market-check movers — how they closed${moversToday ? ` (reason found for ${reasonsFound} of ${moversToday})` : ""}`, "| Stock | Alert → close | Label |", todayRows))
   if (tally.size) blocks.push(["## Label accuracy so far", ...[...tally].map(([label, { right, total }]) =>
     `- **${label}**${label === "likely to fade" ? " (retired 21 Oct)" : ""}: right ${right}/${total} (${Math.round((right / total) * 100)}%)`)].join("\n\n"))
 
