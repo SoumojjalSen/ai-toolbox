@@ -24,23 +24,35 @@ test("convertMarkdownToEmailHtml: detail rows, colors, callouts, raw HTML", () =
     ].join("\n"),
   )
 
-  // each row is a card: title, short verdict as a badge, the rest as labelled lines; ↳ rows become detail lines
-  assert.doesNotMatch(html, /<table|<tr|<td/)
-  assert.match(html, /<strong>Orient Cables<\/strong><span style="[^"]*">Book gains<\/span>|<strong>Orient Cables<\/strong>/)
-  assert.match(html, /Risk: GMP slipping\. <a style="[^"]*" href="https:\/\/example\.com">src<\/a><\/div>/)
+  // ↳ row → one full-width cell with the marker removed, same background as its parent row
+  assert.match(html, /<tr style="background-color:#ffffff"><td colspan="4"[^>]*>Risk: GMP slipping\. <a style="[^"]*" href="https:\/\/example\.com">src<\/a><\/td><\/tr>/)
   assert.doesNotMatch(html, /↳/)
-  // 🟢 first cell → green-edged card, marker removed
-  assert.match(html, /border-left:4px solid #16a34a;background-color:#f0fdf4"><div[^>]*><strong>SRIT/)
-  // 🟢 / 🔴 cells coloured, dot removed; header names label the lines
+  // next real row alternates
+  assert.match(html, /<tr style="background-color:#f9fafb"><td[^>]*><strong>Nityas/)
+  // 🟢 in the first cell tints the row and its detail row, marker removed
+  assert.match(html, /<tr style="background-color:#f0fdf4"><td[^>]*><strong>SRIT/)
+  assert.match(html, /<tr style="background-color:#f0fdf4"><td colspan="4"[^>]*>Risk: NII money flips fast\./)
+  // 🟢 / 🔴 cells colored, dot removed
   assert.match(html, /color:#16a34a">₹107/)
-  assert.match(html, />GMP<\/span>/)
-  assert.doesNotMatch(html, />🟢|>🔴/)
+  assert.match(html, /color:#dc2626">Avoid/)
+  assert.doesNotMatch(html, /<td[^>]*>🟢/)
   // callout + escaped raw HTML
   assert.match(html, /background-color:#f3f4f6;border-left:4px solid #1e3a5f"><p style="margin:0">Expected open: flat/)
   assert.match(html, /background-color:#fef3c7;border-left:4px solid #d97706"><p style="margin:0">⚠️ Markets shut today/)
   assert.match(html, /<p style="margin:4px 0 12px;color:#6b7280[^"]*">Sources:/)
   assert.match(html, /&lt;script&gt;/)
   assert.doesNotMatch(html, /<script>/)
+})
+
+test("a long cell with · separated points becomes bullets; short cells and the stock cell stay inline", () => {
+  const html = convertMarkdownToEmailHtml([
+    "| Stock | Levels | Analysis |",
+    "|---|---|---|",
+    "| 🟢 **BIL** · Bhansali | ₹100 · SL ₹90 | 🟢 RS 97, Stage 2 [chart](https://x.com) · Q1 profit +218% · no bad news |",
+  ].join("\n"))
+  assert.match(html, /color:#16a34a"><ul style="[^"]*"><li>RS 97, Stage 2 <a style="[^"]*" href="https:\/\/x\.com">chart<\/a><\/li><li>Q1 profit \+218%<\/li><li>no bad news<\/li><\/ul><\/td>/)
+  assert.match(html, /<td[^>]*>₹100 · SL ₹90<\/td>/)
+  assert.match(html, /<td[^>]*><strong>BIL<\/strong> · Bhansali<\/td>/)
 })
 
 test("buildGlossary lists only the terms the email uses", () => {

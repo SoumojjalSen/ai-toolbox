@@ -83,6 +83,13 @@ async function fetchSubscription(symbol: string): Promise<Subscription | undefin
   return parseSubscription(data.dataList, data.updateTime)
 }
 
+// Shareholders of a listed parent get their own portion (and can bid in it and as retail). Stops at the next
+// clause; the amount keeps the comma inside the number ("Rs. 25,000 million").
+export function parseShareholderQuota(issueSize: string): string | undefined {
+  return issueSize.match(/eligible [^,()]*?shareholders[^,()]*?(?:rs\.? ?[\d,.]+(?: (?:million|crore|lakh))?|[\d,]+ equity shares)/i)?.[0]
+    ?? issueSize.match(/eligible [^,()]*?shareholders[^,()]*/i)?.[0]
+}
+
 async function fetchDetail(symbol: string): Promise<Pick<IpoIssue, "lot" | "size" | "reservedFor" | "upiCutoff" | "rhp">> {
   const rows = (await fetchNseJson<NseDetail>(`ipo-detail?symbol=${encodeURIComponent(symbol)}&series=EQ`))?.issueInfo?.dataList ?? []
   const value = (title: string) => rows.find((row) => row.title === title)?.value.replace(/^"|"$/g, "").trim()
@@ -90,8 +97,7 @@ async function fetchDetail(symbol: string): Promise<Pick<IpoIssue, "lot" | "size
   return {
     lot: value("Bid Lot")?.replace(/ Equity Shares and in multiples thereof/i, " shares"),
     size,
-    // shareholders of a listed parent get their own portion (and can bid in it and as retail)
-    reservedFor: size?.match(/eligible [^,()]*?shareholders[^,()]*/i)?.[0],
+    reservedFor: size ? parseShareholderQuota(size) : undefined,
     upiCutoff: value("Cut-off time for UPI Mandate Confirmation")?.match(/\d{1,2}:\d{2} ?[AP]M/i)?.[0],
     rhp: value("Red Herring Prospectus"),
   }
@@ -165,24 +171,22 @@ export async function buildIpoBrief(holdingSymbols: Set<string>, now = new Date(
   ].filter(Boolean).join("\n\n")
 }
 
-export type IpoCall = "apply now" | "apply and wait" | "keep" | "cancel"
-export interface IpoCallRecord { symbol: string; name: string; time: string; qib?: number; call: IpoCall }
+export type IpoCall = "apply now" | "wait for 16:15" | "skip"
+export interface IpoCallRecord { symbol: string; name: string; time: string; qib?: number; call: IpoCall | "keep" | "cancel" } // keep/cancel: calls saved before 24 Oct 2026
 
-// Closing day, two steps (retail can cancel a bid until 5 PM; QIB bidding closes at 4 PM):
-// 14:00 — QIB ≥ 20× already → apply now (final QIB only goes up). Otherwise apply to hold a place and wait:
-//   on 19 Oct, QIB at 13:54 → final was 14.6× → 121× (Bonfiglioli) and 1.6× → 35× (Sahajanand).
-// 16:15 — QIB is final: ≥ 20× → keep (or apply now), under 20× → cancel before ~4:45 (apps slow down near 5 PM).
+// Closing day, no cancelling (QIB bidding closes at 4 PM, retail at 5 PM; QIB only goes up during the day):
+// 14:00 — QIB ≥ 20× already → apply now. Otherwise wait: on 19 Oct, QIB at 13:54 → final was 14.6× → 121×
+//   (Bonfiglioli) and 1.6× → 35× (Sahajanand), so a low early number decides nothing.
+// 16:15 — QIB is final: ≥ 20× → apply now (before ~4:45, apps slow down near 5 PM), under 20× → skip.
 export function ipoCall(qib: number | undefined, isFinal: boolean): IpoCall {
-  const strong = qib !== undefined && qib >= STRONG_QIB
-  if (isFinal) return strong ? "keep" : "cancel"
-  return strong ? "apply now" : "apply and wait"
+  if (qib !== undefined && qib >= STRONG_QIB) return "apply now"
+  return isFinal ? "skip" : "wait for 16:15"
 }
 
-const CALL_TEXT: Record<IpoCall, (issue: IpoIssue) => string> = {
-  "apply now": (issue) => `🟢 apply now — QIB already ≥${STRONG_QIB}× · lists ${issue.listing} · plan to sell on listing day`,
-  "apply and wait": () => `🟡 apply now to hold your place (unless this morning's report said avoid) — the 16:15 email says keep or cancel from the final QIB`,
-  keep: (issue) => `🟢 keep your bid (or apply now, before ~4:45 PM) — final QIB ≥${STRONG_QIB}× · lists ${issue.listing} · plan to sell on listing day`,
-  cancel: () => `🔴 cancel your bid before ~4:45 PM (retail can cancel until 5 PM) — final QIB under ${STRONG_QIB}×: almost half such IPOs listed below the issue price`,
+const CALL_TEXT: Record<IpoCall, (issue: IpoIssue, isFinal: boolean) => string> = {
+  "apply now": (issue, isFinal) => `🟢 apply now${isFinal ? " (before ~4:45 PM) unless you applied at 14:00" : ""} — QIB ≥${STRONG_QIB}× · lists ${issue.listing} · plan to sell on listing day`,
+  "wait for 16:15": () => `🟡 don't apply yet — QIB under ${STRONG_QIB}× so far; most QIB money comes in the last hours. The 16:15 email says apply or skip`,
+  skip: () => `🔴 skip — final QIB under ${STRONG_QIB}×: almost half such IPOs listed below the issue price`,
 }
 
 // The IPO rows for the 14:00 market check (early read) and the 16:15 final; the calls are saved for the scorecard
@@ -200,21 +204,21 @@ export async function buildIpoClosingToday(now = new Date(), isFinal = false): P
       const stale = !updated.startsWith(nseDate(now)) || (isFinal && updated.slice(12, 14) < "16")
         ? " ⚠️ NSE's number isn't the latest — check it in your broker app before acting" : ""
       const call = calls[index].call
-      return `| ${call === "cancel" ? "🔴" : "🟢"} **${issue.name}** · ${issue.band} | ${issue.subscription ? formatSubscription(issue.subscription) : "no data"} | ${CALL_TEXT[call](issue)}${stale}${issue.reservedFor ? ` · ⭐ ${issue.reservedFor}` : ""} |`
+      return `| ${call === "skip" ? "🔴" : call === "apply now" ? "🟢" : "🟡"} **${issue.name}** · ${issue.band} | ${issue.subscription ? formatSubscription(issue.subscription) : "no data"} | ${CALL_TEXT[call](issue, isFinal)}${stale}${issue.reservedFor ? ` · ⭐ ${issue.reservedFor}` : ""} |`
     }),
   ]
   return { rows, calls }
 }
 
-// 16:15 on a closing day: keep or cancel from the final QIB number. Sends nothing on other days.
+// 16:15 on a closing day: apply or skip from the final QIB number. Sends nothing on other days.
 export async function buildIpoFinal(now = new Date()): Promise<{ count: number; subject: string; html: string }> {
   const { rows, calls } = await buildIpoClosingToday(now, true)
   if (!calls.length) return { count: 0, subject: "", html: "" }
   await writeJson(`ipo-calls/${todayIst()}-final.json`, calls)
-  const doNow = calls.map((call) => `**${call.name.replace(/ Limited$/, "")}:** ${call.call === "keep" ? "keep your bid (or apply now)" : "cancel your bid"} — final QIB ${call.qib?.toFixed(1) ?? "?"}×`)
+  const doNow = calls.map((call) => `**${call.name.replace(/ Limited$/, "")}:** ${call.call === "apply now" ? "apply now, unless you applied at 14:00" : "skip"} — final QIB ${call.qib?.toFixed(1) ?? "?"}×`)
   const markdown = [
     `# IPO final call — ${nseDate(now)}`,
-    `> 🟢 **Do now — before ~4:45 PM** (retail bids and cancellations close at 5 PM; apps slow down near the end)\n>\n> ${doNow.join("\n>\n> ")}`,
+    `> 🟢 **Do now — before ~4:45 PM** (retail bids close at 5 PM; apps slow down near the end)\n>\n> ${doNow.map((item) => `- ${item}`).join("\n> ")}`,
     rows.join("\n"),
     `_Rule (174 IPOs, Jul 2025 → Oct 2026): final QIB ≥ ${STRONG_QIB}× → median listing gain +17%, 5 in 99 listed below the issue price; under ${STRONG_QIB}× → median 0%, almost half below._`,
   ].join("\n\n")

@@ -2,7 +2,7 @@ import { buildIpoBrief } from "./ipo.js"
 import { AppError } from "../../errors.js"
 import { HttpStatus, ErrorCode } from "../../constants.js"
 import { fetchNse, fetchNseJson } from "./nse.js"
-import { fetchMarketLenses, fetchFilingHistory, type EventKind, type MarketLenses } from "./lenses.js"
+import { fetchMarketLenses, fetchFilingHistory, fetchResultsLine, type EventKind, type MarketLenses } from "./lenses.js"
 import { readJson, writeJson, todayIst, nseDate, parseNseDate, listJson, readText, writeText, listFiles, deleteFile } from "./store.js"
 import { recordPicks, buildTrackRecord, findOpenTrades, tradeStatus } from "./scorecard.js"
 
@@ -174,11 +174,13 @@ export function computeStockSignals(sessions: DailyPriceRow[][]): StockSignal[] 
   return stockSignals
 }
 
-// Swing setups. Rules chosen by backtest (NSE daily price files, Oct 2025 → Oct 2026, ~3,400 trades, entry at the next open,
-// 0.05R costs): Stage 2 + tight 10-day range, strongest RS first, stop 2 × the average daily range (ATR14), target 3R, hold ≤ 30 sessions
-// averaged +0.24R a trade (+0.44R in a strong market) vs −0.07R for a random stock above its 200-day average.
-// 20-day breakouts, episodic pivots, loser bounces and intraday setups all lost money after costs — they stay as
-// context lists, never as picks.
+// Swing setups: Stage 2 + tight 10-day range, strongest RS first, stop 2 × the average daily range (ATR14), target 3R,
+// hold ≤ 30 sessions. Backtest on NSE daily price files (Jul 2023 → Oct 2026, signals from May 2024, entry at the next
+// open, 0.25% round-trip cost, top 10 a day): −0.05R a trade overall — the rule only made money in a STRONG market
+// (+0.04R, or +0.15R leaving out stocks with a split/bonus nearby); neutral −0.10R, weak −0.08R. So: buys only when
+// the regime is strong (see RISK_BY_REGIME). An earlier one-year test (Oct 2025 → Oct 2026) showed +0.24R; it didn't
+// hold over three years. 20-day breakouts, episodic pivots, loser bounces and intraday setups all lost money after
+// costs — they stay as context lists, never as picks.
 const SWING_STOP_ATR = 2
 const REWARD_TO_RISK = 3
 export const SWING_HOLD_SESSIONS = 30
@@ -224,8 +226,7 @@ export function rankSwingSetups(stockSignals: StockSignal[]): TradeSetup[] {
     .sort((a, b) => (a.kind === b.kind ? b.relativeStrengthRank - a.relativeStrengthRank : a.kind === "core" ? -1 : 1))
 }
 
-// Market regime from breadth (O'Neil's "M", Stockbee's 4% counts) — sets how much capital to put to work.
-// Backtest: the core rule made +0.44R a trade in "strong", +0.17R in "weak" — so weak means smaller, not zero.
+// Market regime from breadth (O'Neil's "M", Stockbee's 4% counts) — decides whether to buy at all (see above).
 export interface Regime {
   label: "strong" | "neutral" | "weak"
   percentAbove50: number
@@ -256,12 +257,12 @@ export function assessRegime(stockSignals: StockSignal[], sessions: DailyPriceRo
   return { label, percentAbove50, percentAbove200, upMoves5d, downMoves5d }
 }
 
-// No cap on the number of picks — every setup that passes all checks is a pick. The mood sets how much to risk
-// on each one: the backtest's edge per trade was smaller in weak markets.
+// No cap on the number of picks in a strong market — every setup that passes all checks is a pick. Neutral and weak:
+// no new buys; setups go on the watchlist until the regime turns strong (3-year backtest above: they lost money).
 const RISK_BY_REGIME: Record<Regime["label"], string> = {
-  strong: "risk 1% of capital per trade",
-  neutral: "risk 1% of capital per trade",
-  weak: "risk 0.5% of capital per trade (smaller edge in weak markets)",
+  strong: "BUY: risk 1% of capital per trade",
+  neutral: "NO NEW BUYS — setups go on the watchlist (3-year backtest: neutral-market picks lost −0.10R a trade)",
+  weak: "NO NEW BUYS — setups go on the watchlist (3-year backtest: weak-market picks lost −0.08R a trade)",
 }
 
 function formatRegime(regime: Regime, vixLine: string): string {
@@ -478,10 +479,10 @@ function formatSwingSetups(ranked: RankedSetup[]): string {
   const core = rows("core")
   const leaders = rows("leader")
   return [
-    `### Swing setups — CORE (Stage 2 + tight range; backtested +0.24R/trade; stop 2×ATR, target 3R, sell by ~${SWING_HOLD_SESSIONS} sessions) — ${core.total} qualified, top ${core.lines.length}`,
-    "Skip a setup if it opens more than 1 ATR above entry (don't chase).",
+    `### Swing setups — CORE (Stage 2 + tight range; bought only in a strong market; stop 2×ATR, target 3R, sell by ~${SWING_HOLD_SESSIONS} sessions) — ${core.total} qualified, top ${core.lines.length}`,
+    "Skip a setup if it trades more than 1% above entry at buy time (don't chase).",
     header, ...core.lines,
-    `### Swing WATCHLIST — leaders (Stage 2 + RS ≥ ${LEADER_MIN_RELATIVE_STRENGTH}, not tight yet; +0.09R/trade) — ${leaders.total} qualified, top ${leaders.lines.length}`,
+    `### Swing WATCHLIST — leaders (Stage 2 + RS ≥ ${LEADER_MIN_RELATIVE_STRENGTH}, not tight yet — watch, not a buy) — ${leaders.total} qualified, top ${leaders.lines.length}`,
     header, ...leaders.lines,
   ].join("\n")
 }
@@ -549,11 +550,12 @@ async function formatNewsCheckEvidence(symbols: string[]): Promise<string> {
   const histories: string[] = []
   for (let start = 0; start < symbols.length; start += 5) {
     const batch = symbols.slice(start, start + 5)
-    const results = await Promise.all(batch.map((symbol) => fetchFilingHistory(symbol)))
+    const results = await Promise.all(batch.map((symbol) => Promise.all([fetchFilingHistory(symbol), fetchResultsLine(symbol)])))
     batch.forEach((symbol, index) => {
-      const filings = results[index]
+      const [filings, resultsLine] = results[index]
       if (!filings) histories.push(`${symbol}: ⚠️ NSE filing history UNAVAILABLE — search NSE filings yourself; until then "not verified"`)
       else histories.push(`${symbol}:${filings.length ? "" : " no material filings in 90 days"}`, ...filings.map((filing) => `  ${filing.time.slice(0, 11)} · ${filing.kind} · ${filing.headline} ${filing.link}`))
+      histories.push(`  ${resultsLine ?? "Results: ⚠️ NSE structured results UNAVAILABLE — read the results filing or a press report"}`)
     })
   }
   const cutoff = Date.now() - FINDINGS_MEMORY_DAYS * 86_400_000
@@ -566,7 +568,7 @@ async function formatNewsCheckEvidence(symbols: string[]): Promise<string> {
     }
   }
   return [
-    "### Filing history — last 90 days (NSE) for the news-check candidates and holdings. Pass each stock's lines to market-stock-analyser; it must read the latest results and any fund raise / governance / pledge filing",
+    "### Filing history — last 90 days (NSE) and latest results (exact numbers from NSE's structured filing) for the news-check candidates and holdings. Pass each stock's lines to market-stock-analyser; the results line counts as verified results — it must still read any fund raise / governance / pledge filing",
     ...histories,
     `### What earlier news checks found (last ${FINDINGS_MEMORY_DAYS} days) — the analyser must say for each: still true, resolved, or outweighed (and why)`,
     ...(earlier.length ? earlier : ["none recorded"]),

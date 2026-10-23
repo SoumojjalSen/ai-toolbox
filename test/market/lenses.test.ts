@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { classifyAnnouncement } from "../../src/services/market/lenses.js"
+import { classifyAnnouncement, parseResultsXbrl, formatResultsLine } from "../../src/services/market/lenses.js"
 
 test("classifyAnnouncement tags market-moving filings and ignores routine ones", () => {
   const cases: [string, string, string | undefined][] = [
@@ -24,4 +24,19 @@ test("classifyAnnouncement tags market-moving filings and ignores routine ones",
     ["Certificate under SEBI (Depositories and Participants) Regulations, 2018", "Certificate for the quarter", undefined],
   ]
   for (const [desc, attchmntText, expected] of cases) assert.equal(classifyAnnouncement({ desc, attchmntText }), expected, attchmntText)
+})
+
+test("parseResultsXbrl reads the quarter's figures, not the year-to-date ones (SMLMAH, Sep-2026 quarter)", () => {
+  const xml = [
+    `<in-capmkt:RevenueFromOperations contextRef="FourD" decimals="-5" unitRef="INR">16273300000</in-capmkt:RevenueFromOperations>`,
+    `<in-capmkt:RevenueFromOperations contextRef="OneD" decimals="-5" unitRef="INR">6697900000</in-capmkt:RevenueFromOperations>`,
+    `<in-capmkt:ProfitLossForPeriod contextRef="OneD" decimals="-6" unitRef="INR">117000000</in-capmkt:ProfitLossForPeriod>`,
+  ].join("\n")
+  assert.deepEqual(parseResultsXbrl(xml), { revenue: 6697900000, profit: 117000000 })
+  assert.equal(parseResultsXbrl("<html>not a results filing</html>"), undefined)
+})
+
+test("formatResultsLine compares with the year-ago and previous quarter, and shows a swing from a loss", () => {
+  const line = formatResultsLine("2026-09", "Consolidated", { revenue: 6697900000, profit: 117000000 }, { revenue: 9582300000, profit: 636200000 }, { revenue: 5549000000, profit: -50000000 })
+  assert.equal(line, "Results (NSE structured filing, consolidated), quarter to 2026-09: revenue ₹669.8 cr (vs year ago +21%, vs last quarter -30%), profit ₹11.7 cr (vs year ago from ₹-5.0 cr, vs last quarter -82%)")
 })

@@ -22,6 +22,11 @@ export interface PickOutcome {
   r: number // result in multiples of the risk; 0 while open
 }
 
+// The highest price worth paying. Backtest (NSE, May 2024 → Oct 2026, strong market): picks that opened within ±1%
+// of the report's price made +0.12R a trade; opened 1–3% higher −0.02R, more than 3% higher −0.11R — the edge is gone.
+const BUY_LIMIT_PERCENT = 1
+export const buyLimit = (pick: { entry: number }) => Math.round(pick.entry * (1 + BUY_LIMIT_PERCENT / 100) * 100) / 100
+
 // Same rules as the backtest: enter at the next session's open, keep the planned risk distance, stop first when
 // both levels fall inside one session, sell at the close of the last allowed session.
 export function scorePick(pick: RecordedPick, laterBars: DailyPriceRow[]): PickOutcome {
@@ -29,8 +34,7 @@ export function scorePick(pick: RecordedPick, laterBars: DailyPriceRow[]): PickO
   const risk = pick.entry - pick.stopLoss
   const rewardMultiple = (pick.target - pick.entry) / risk
   const entry = laterBars[0].open
-  // gapped more than half the risk above the planned entry: the report says don't chase
-  if (entry > pick.entry + 0.5 * risk) return { status: "not entered", r: 0 }
+  if (entry > buyLimit(pick)) return { status: "not entered", r: 0 } // the report says don't chase
   const stop = entry - risk
   const target = entry + rewardMultiple * risk
   for (const bar of laterBars.slice(0, MAX_HOLD_SESSIONS)) {
@@ -96,7 +100,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: DailyPr
   if (!overall.closed && !open && !skipped) return ""
   return [
     `### Track record of this system's top core setups (live, last ~${TRACK_RECORD_SESSIONS} sessions; R = multiples of the risk taken)`,
-    describe("All", overall) + ` · ${open} still open · ${skipped} skipped (gapped above entry)`,
+    describe("All", overall) + ` · ${open} still open · ${skipped} skipped (opened above the buy limit)`,
     ...[...byLens].map(([lens, tally]) => describe(`With ${lens}`, tally)),
     ...[...byRegime].map(([regime, tally]) => describe(`Picked in a ${regime} market`, tally)),
   ].join("\n")

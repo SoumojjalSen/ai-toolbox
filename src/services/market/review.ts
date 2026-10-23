@@ -1,36 +1,24 @@
 import { loadStockSignals, type DailyPriceRow } from "./scan.js"
-import { scorePick, buildTrackRecord, type ReportPick, type Finding } from "./scorecard.js"
+import { scorePick, buildTrackRecord, buyLimit, type ReportPick, type Finding } from "./scorecard.js"
 import { readHoldings } from "./holdings.js"
 import { fetchFilingHistory } from "./lenses.js"
 import { fetchNseJson } from "./nse.js"
 import { STRONG_QIB, type IpoCallRecord } from "./ipo.js"
 import { readJson, listJson, todayIst, nseDate } from "./store.js"
-import type { MoverAlert, MoveLabel } from "./alert.js"
+import type { MarketEmail } from "./alert.js"
 import { convertMarkdownToEmailHtml, markdownTable, tableCell } from "../../formats.js"
 
 // Evening scorecard (~19:30, after NSE publishes the day's price file) — code only. Today's picks, the running
-// track record, whether the market-check labels were right, and a system check that flags the day's mistakes
+// track record, your holdings, and a system check that flags the day's mistakes
 // (a pick that failed fast on news the check should have read, a stock re-picked after a drop, IPO calls vs the
 // final numbers and the listing, data NSE didn't return) — so problems show up the same evening.
 
-const MISSED_MOVE_PERCENT = 7
-const MISSED_MIN_TURNOVER_LAKHS = 1000 // ₹10 cr
 const FAST_FAILURE_PERCENT = -5 // a pick down this much within 2 sessions of its report
 const RECHECK_DAYS = 14
-
-interface AlertRun { time: string; rows: { symbol: string; price: number; changePercent: number; label: MoveLabel; why?: string }[] }
 
 const sign = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(1)}%`
 const dayChange = (bar: DailyPriceRow) => ((bar.close - bar.prevClose) / bar.prevClose) * 100
 const daysAgo = (isoDate: string) => (Date.now() - new Date(`${isoDate}T00:00:00+05:30`).getTime()) / 86_400_000
-
-// A label is right when the close agrees with it: fade → the move shrank by more than a quarter or reversed
-export function labelWasRight(label: MoveLabel, alertChange: number, closeChange: number): boolean | undefined {
-  const held = Math.sign(closeChange) === Math.sign(alertChange) && Math.abs(closeChange) >= 0.75 * Math.abs(alertChange)
-  if (label === "likely to fade") return !held
-  if (label === "news-backed" || label === "bad news, may continue") return held
-  return undefined // "no news found" and "not a real move" make no prediction
-}
 
 async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[][], sessionIndexOf: (isoDate: string) => number): Promise<string[]> {
   const checks: string[] = []
@@ -101,7 +89,7 @@ async function buildSystemCheck(sessionDates: string[], sessions: DailyPriceRow[
   return checks
 }
 
-export async function buildEveningScorecard(): Promise<MoverAlert> {
+export async function buildEveningScorecard(): Promise<MarketEmail> {
   const [{ sessionDates, sessions }, holdings] = await Promise.all([loadStockSignals(), readHoldings()])
   const today = nseDate()
   if (sessionDates.at(-1) !== today) return { count: 0, subject: "", html: "" } // holiday, or the price file isn't out yet
@@ -121,9 +109,8 @@ export async function buildEveningScorecard(): Promise<MoverAlert> {
       const bar = todayBars.get(pick.symbol)
       if (!bar) return `| ${pick.symbol} | no data | — | — |`
       const risk = pick.entry - pick.stopLoss
-      const skipAbove = pick.entry + 0.5 * risk
       const resultInR = (bar.close - pick.entry) / risk
-      const result = bar.low > skipAbove ? "skipped — never in the buy zone"
+      const result = bar.low > buyLimit(pick) ? "skipped — never at or below the buy limit"
         : bar.low <= pick.stopLoss ? "🔴 stop loss hit" : bar.high >= pick.target ? "🟢 target hit" : `${resultInR >= 0 ? "🟢" : "🔴"} open, ${resultInR >= 0 ? "+" : ""}${resultInR.toFixed(2)}R`
       return `| ${result.startsWith("🔴") ? "🔴" : ""}**${pick.symbol}** | ${result} | ₹${bar.open} → ₹${bar.close} (${sign(dayChange(bar))}) | ₹${pick.entry} |`
     })))
@@ -143,49 +130,12 @@ export async function buildEveningScorecard(): Promise<MoverAlert> {
     }
   }
   blocks.push(`## Track record — report picks\n\n${closed
-    ? `${closed} closed · ${Math.round((wins / closed) * 100)}% hit target · avg ${(totalR / closed).toFixed(2)}R · total ${totalR.toFixed(1)}R · ${open} still open · ${notEntered} skipped (gapped above the buy zone)`
+    ? `${closed} closed · ${Math.round((wins / closed) * 100)}% hit target · avg ${(totalR / closed).toFixed(2)}R · total ${totalR.toFixed(1)}R · ${open} still open · ${notEntered} skipped (opened above the buy limit)`
     : `No closed trades yet — ${open} open, ${notEntered} skipped. Trades last up to ~6 weeks.`}`)
   const codeRecord = await buildTrackRecord(sessionDates, sessions)
   if (codeRecord) blocks.push(codeRecord.replace(/^### .*$/m, "## Track record — top code setups (all lenses)").replace(/\n/g, "\n\n"))
 
-  // 4. were the market-check labels right? today, and over every saved day
-  const tally = new Map<MoveLabel, { right: number; total: number }>()
-  const todayRows: string[] = []
-  const alertedToday = new Set<string>()
-  let reasonsFound = 0, moversToday = 0
-  for (const file of await listJson("alerts")) {
-    const index = sessionIndexOf(file.replace(/\.json$/, ""))
-    if (index < 0) continue
-    const bars = barsOn(index)
-    for (const run of (await readJson<AlertRun[]>(`alerts/${file}`)) ?? []) {
-      for (const row of run.rows) {
-        const bar = bars.get(row.symbol)
-        if (!bar) continue
-        const right = labelWasRight(row.label, row.changePercent, dayChange(bar))
-        if (right !== undefined) {
-          const entry = tally.get(row.label) ?? { right: 0, total: 0 }
-          tally.set(row.label, { right: entry.right + (right ? 1 : 0), total: entry.total + 1 })
-        }
-        if (index === sessions.length - 1) {
-          alertedToday.add(row.symbol)
-          if (row.why !== undefined) moversToday++ // older runs didn't save the reason
-          if (row.why && row.why !== "no reason found yet") reasonsFound++
-          todayRows.push(`| **${row.symbol}** | ${run.time}: ${sign(row.changePercent)} → close ${sign(dayChange(bar))} | ${row.label}${right === undefined ? "" : right ? " ✅" : " ❌"} |`)
-        }
-      }
-    }
-  }
-  if (todayRows.length) blocks.push(markdownTable(`## Market-check movers — how they closed${moversToday ? ` (reason found for ${reasonsFound} of ${moversToday})` : ""}`, "| Stock | Alert → close | Label |", todayRows))
-  if (tally.size) blocks.push(["## Label accuracy so far", ...[...tally].map(([label, { right, total }]) =>
-    `- **${label}**${label === "likely to fade" ? " (retired 21 Oct)" : ""}: right ${right}/${total} (${Math.round((right / total) * 100)}%)`)].join("\n\n"))
-
-  // 5. big moves the market check missed
-  const missed = [...todayBars.values()]
-    .filter((bar) => bar.turnoverLakhs >= MISSED_MIN_TURNOVER_LAKHS && Math.abs(dayChange(bar)) >= MISSED_MOVE_PERCENT && !alertedToday.has(bar.symbol))
-    .sort((a, b) => Math.abs(dayChange(b)) - Math.abs(dayChange(a))).slice(0, 12)
-  if (missed.length) blocks.push(`## Big moves the market check missed (≥${MISSED_MOVE_PERCENT}%, ≥₹10 cr traded)\n\n${missed.map((bar) => `${bar.symbol} ${sign(dayChange(bar))} (opened ${sign(((bar.open - bar.prevClose) / bar.prevClose) * 100)})`).join(", ")}`)
-
-  // 6. holdings today
+  // 4. holdings today
   const holdingBars = [...holdings.symbols].map((symbol) => todayBars.get(symbol)).filter((bar): bar is DailyPriceRow => !!bar)
   if (holdingBars.length) blocks.push(`## Your holdings today\n\n${holdingBars.sort((a, b) => dayChange(b) - dayChange(a)).map((bar) => `${bar.symbol} ${sign(dayChange(bar))}`).join(" · ")}`)
 

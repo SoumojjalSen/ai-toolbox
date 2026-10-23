@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { addTradingDays, parseSubscription, qibVerdict, anchorUnlocks, ipoCall } from "../../src/services/market/ipo.js"
+import { addTradingDays, parseSubscription, qibVerdict, anchorUnlocks, ipoCall, parseShareholderQuota } from "../../src/services/market/ipo.js"
 
 const holidays = new Set(["20-Oct-2026"])
 
@@ -35,12 +35,19 @@ test("anchorUnlocks flags holdings ~90 days after allotment", () => {
   assert.ok(flags[0].startsWith("SBIFUNDS: last anchor shares unlock ~15-Oct-2026"))
 })
 
-test("ipoCall: early read applies now only at ≥20×, otherwise apply and wait; the final keeps or cancels", () => {
+test("ipoCall: apply as soon as QIB is ≥20×; under it wait at 14:00 and skip at 16:15 — never a cancel", () => {
   // 19 Oct at 13:54 → final: Tonbo 47× → 294×, Bonfiglioli 14.6× → 121×, Sahajanand 1.6× → 35×, Zetwerk 1.6× → 4.7×
   assert.equal(ipoCall(47.2, false), "apply now")
-  assert.equal(ipoCall(14.6, false), "apply and wait")
-  assert.equal(ipoCall(undefined, false), "apply and wait")
-  assert.equal(ipoCall(120.8, true), "keep")
-  assert.equal(ipoCall(34.7, true), "keep")
-  assert.equal(ipoCall(4.7, true), "cancel")
+  assert.equal(ipoCall(14.6, false), "wait for 16:15")
+  assert.equal(ipoCall(undefined, false), "wait for 16:15")
+  assert.equal(ipoCall(120.8, true), "apply now")
+  assert.equal(ipoCall(34.7, true), "apply now")
+  assert.equal(ipoCall(4.7, true), "skip")
+  assert.equal(ipoCall(undefined, true), "skip")
+})
+
+test("parseShareholderQuota keeps the whole amount (Jio Platforms, 23 Oct 2026)", () => {
+  const size = "Fresh Issue of up to 27,00,00,000 equity shares (including Employee Reservation Portion aggregating up to Rs. 5,000 million, Eligible RIL shareholders portion aggregating up to Rs. 25,000 million and Anchor reservation portion of 7,24,74,066 equity shares)"
+  assert.equal(parseShareholderQuota(size), "Eligible RIL shareholders portion aggregating up to Rs. 25,000 million")
+  assert.equal(parseShareholderQuota("Fresh issue of 1,00,000 equity shares"), undefined)
 })

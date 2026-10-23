@@ -6,7 +6,7 @@ import { join } from "path"
 import type { DailyPriceRow } from "../../src/services/market/scan.js"
 
 process.env.MARKET_DATA_DIR = mkdtempSync(join(tmpdir(), "scorecard-"))
-const { scorePick, recordPicks, buildTrackRecord } = await import("../../src/services/market/scorecard.js")
+const { scorePick, buyLimit, recordPicks, buildTrackRecord } = await import("../../src/services/market/scorecard.js")
 
 const bar = (open: number, high: number, low: number, close: number, symbol = "ACME"): DailyPriceRow =>
   ({ symbol, prevClose: open, open, high, low, close, volume: 1000, turnoverLakhs: 100, deliveryPercent: 40 })
@@ -17,6 +17,12 @@ test("scorePick: target, stop (stop wins a same-session tie), open, not entered"
   assert.deepEqual(scorePick(pick, [bar(100, 131, 89, 100)]), { status: "stop", r: -1 })
   assert.deepEqual(scorePick(pick, [bar(100, 105, 95, 104)]), { status: "open", r: 0 })
   assert.deepEqual(scorePick(pick, [bar(108, 110, 100, 105)]), { status: "not entered", r: 0 })
+})
+
+test("buy limit is 1% above the report's entry — opening higher means no trade", () => {
+  assert.equal(buyLimit(pick), 101)
+  assert.deepEqual(scorePick(pick, [bar(101.5, 105, 100, 104)]), { status: "not entered", r: 0 })
+  assert.deepEqual(scorePick(pick, [bar(101, 105, 100, 104)]), { status: "open", r: 0 })
 })
 
 test("recordPicks skips symbols that are still open from an earlier day", async () => {

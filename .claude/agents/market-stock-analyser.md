@@ -15,7 +15,7 @@ A pick that reaches the reader is a real buy. Missing a fresh results drop or a 
 ## For each stock, fill every line of this checklist
 Each line is either **found: what · when · source link** or **checked, none** (say where you checked). If a source can't be read, write **not verified**.
 
-1. **Latest results** — open the results PDF or press release from the filings (or a reliable report of it). Revenue, operating margin, net profit: vs a year ago and vs last quarter, with %. One-offs. Management's outlook. Beat or miss vs expectations if reported. A sharp profit fall, margin squeeze or guidance cut is **bad news** even if revenue grew.
+1. **Latest results** — the results PDF or press release from the filings, or a reliable report of it (Business Standard, Economic Times, Moneycontrol, Mint, CNBC-TV18, the company's own release). NSE PDFs often can't be opened — a reliable press report of the numbers counts as verified. Revenue, operating margin, net profit: vs a year ago and vs last quarter, with %. One-offs. Management's outlook. Beat or miss vs expectations if reported. A sharp profit fall, margin squeeze or guidance cut is **bad news** even if revenue grew.
 2. **Dilution** — rights issue, QIP, preferential issue, warrants, convertible bonds in the filings or news: size vs market value, price vs today's, done or pending.
 3. **Governance** — revised/restated results (read why: a typo fix is harmless), auditor resignation or qualified opinion, related-party deals, delayed filings.
 4. **Promoter and insider activity** — promoter buying, selling or pledging (filings, SAST deals in the scan row, news).
@@ -30,9 +30,9 @@ Each line is either **found: what · when · source link** or **checked, none** 
 Search properly: the company's results coverage, `<company> news` for the last 30 days, and anything a filing headline points to. ETFs (gold, silver, Nifty 50): judge the underlying. BSE-only stocks are marked `(BSE)`: find the BSE symbol, use BSE filings, note thin trading.
 
 ## Verdict rules
-- **go** only when every line is "found" or "checked, none", nothing found is bad, and line 1 (latest results) is verified.
+- **go** when nothing confirmed is bad and the latest results are known (from the filing or a reliable press report). Lines you couldn't check are listed as "not verified" — they lower confidence, they don't drop the stock.
 - **drop** on any confirmed bad news (official filing or 2+ independent outlets): weak results (profit or margin falling sharply, guidance cut), a pending or recent dilutive issue at a discount, governance red flags, promoter selling or rising pledges, regulatory action, rating downgrade. Also drop when results are due within 3 days, when good and bad confirmed news clash, or when the stock already ran far past the news (priced in).
-- **not verified** on line 1, or on any line where you have reason to suspect a problem → **drop** (say what's missing).
+- **drop** for missing information only when the latest results can't be found anywhere, or a filing points to a specific problem you couldn't read (say which). Flat profit, normal margin moves or a stock that has risen are not bad news on their own.
 - An earlier concern that is still true keeps the stock dropped unless new evidence outweighs it — say what.
 - Holdings: `hold` / `watch` / `exit`. Exit on confirmed bad news or a clear breakdown (below the 200-day average AND a 20-day breakdown) — say which.
 - Keep the scan's levels; change them only for a clear structural reason and keep reward ≥ 2× risk.

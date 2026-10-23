@@ -109,6 +109,61 @@ export async function fetchFilingHistory(symbol: string, now = new Date(), days 
   }).slice(0, 12)
 }
 
+// Results from NSE's structured (XBRL) filings — exact numbers, no PDF reading. Checked against press reports on
+// 21 stocks (23 Oct 2026): latest quarter found for 21 of 21, numbers matched 10 of 10. The format started mid-2025,
+// so a year-ago quarter can be missing.
+interface NseResultsFiling { qe_Date: string; consolidated: string | null; type: string; xbrl: string | null }
+export interface QuarterFigures { revenue: number; profit: number } // ₹
+
+export function parseResultsXbrl(xml: string): QuarterFigures | undefined {
+  const quarterValue = (name: string) => xml.match(new RegExp(`<[\\w-]+:${name} contextRef="OneD"[^>]*>([^<]+)<`))?.[1] // OneD = the quarter, FourD = year to date
+  const revenue = Number(quarterValue("RevenueFromOperations"))
+  const profit = Number(quarterValue("ProfitLossForPeriod"))
+  return quarterValue("RevenueFromOperations") && quarterValue("ProfitLossForPeriod") && Number.isFinite(revenue) && Number.isFinite(profit) ? { revenue, profit } : undefined
+}
+
+const crore = (rupees: number) => `₹${(rupees / 1e7).toFixed(1)} cr`
+function versus(label: string, now: number, before: number | undefined): string | undefined {
+  if (before === undefined) return undefined
+  if (before <= 0) return `${label} from ${crore(before)}` // a % change from a loss means nothing
+  const change = Math.round(((now - before) / before) * 100)
+  return `${label} ${change > 0 ? "+" : ""}${change}%`
+}
+const compared = (parts: (string | undefined)[]) => (parts.some(Boolean) ? ` (${parts.filter(Boolean).join(", ")})` : "")
+
+export function formatResultsLine(quarter: string, basis: string, latest: QuarterFigures, previousQuarter?: QuarterFigures, yearAgo?: QuarterFigures): string {
+  return `Results (NSE structured filing, ${basis.toLowerCase()}), quarter to ${quarter}: ` +
+    `revenue ${crore(latest.revenue)}${compared([versus("vs year ago", latest.revenue, yearAgo?.revenue), versus("vs last quarter", latest.revenue, previousQuarter?.revenue)])}, ` +
+    `profit ${crore(latest.profit)}${compared([versus("vs year ago", latest.profit, yearAgo?.profit), versus("vs last quarter", latest.profit, previousQuarter?.profit)])}`
+}
+
+// The latest quarter vs the one before and a year earlier, consolidated when filed. undefined = NSE didn't answer.
+export async function fetchResultsLine(symbol: string): Promise<string | undefined> {
+  const list = await fetchNseJson<{ data?: NseResultsFiling[] }>(`integrated-filing-results?index=equities&symbol=${encodeURIComponent(symbol)}`)
+  if (!list?.data) return undefined
+  const filings = list.data.filter((filing) => filing.type.includes("Financials") && filing.xbrl && filing.consolidated)
+  if (!filings.length) return "Results: no structured results filing on NSE — read the latest results filing or a press report"
+  const quarterEnd = (filing: NseResultsFiling) => new Date(`${filing.qe_Date} 12:00 UTC`).getTime()
+  const latest = filings.reduce((newest, filing) => (quarterEnd(filing) > quarterEnd(newest) ? filing : newest))
+  const basis = filings.some((filing) => filing.qe_Date === latest.qe_Date && filing.consolidated === "Consolidated") ? "Consolidated" : "Standalone"
+  const sameBasis = filings.filter((filing) => filing.consolidated === basis) // newest filing first, so find() takes the latest revision
+  const daysBefore = (filing: NseResultsFiling) => (quarterEnd(latest) - quarterEnd(filing)) / 86_400_000
+  const figuresOf = async (filing: NseResultsFiling | undefined) => {
+    if (!filing) return undefined
+    const response = await fetchNse(filing.xbrl!).catch(() => undefined)
+    return response?.ok ? parseResultsXbrl(await response.text()) : undefined
+  }
+  const [now, previousQuarter, yearAgo] = await Promise.all([
+    figuresOf(sameBasis.find((filing) => daysBefore(filing) === 0)),
+    figuresOf(sameBasis.find((filing) => daysBefore(filing) > 80 && daysBefore(filing) < 100)),
+    figuresOf(sameBasis.find((filing) => daysBefore(filing) > 355 && daysBefore(filing) < 375)),
+  ])
+  if (!now) return `Results: NSE structured filing for the quarter to ${latest.qe_Date} couldn't be read — use the results filing or a press report`
+  const [, month, year] = latest.qe_Date.split("-")
+  const monthNumber = String(new Date(`1 ${month} 2000`).getMonth() + 1).padStart(2, "0")
+  return formatResultsLine(`${year}-${monthNumber}`, basis, now, previousQuarter, yearAgo)
+}
+
 interface NseSastRow { symbol: string; acqSaleType: string; acquisitionMode: string; acquirerName: string; promoterType: string; totAcqShare: string | null; totSaleShare: string | null; acquirerDate: string }
 interface NseCorporateAction { symbol: string; subject: string; exDate: string }
 interface NseSurveillanceRow { symbol: string; survDesc?: string; gsmStage?: string }

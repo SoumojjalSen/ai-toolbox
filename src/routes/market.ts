@@ -1,6 +1,6 @@
 import { Router } from "express"
 import { asyncHandler } from "../errors.js"
-import { buildMoverAlert } from "../services/market/alert.js"
+import { buildMarketCheck } from "../services/market/alert.js"
 import { buildEveningScorecard } from "../services/market/review.js"
 import { buildIpoFinal } from "../services/market/ipo.js"
 
@@ -11,7 +11,7 @@ const router = Router()
 router.get(
   "/market/alert",
   asyncHandler(async (_req, res) => {
-    res.json(await buildMoverAlert())
+    res.json(await buildMarketCheck())
   }),
 )
 
