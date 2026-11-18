@@ -63,12 +63,12 @@ export interface StockSignal {
 
 // sec_bhavdata_full: "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE,
 // AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER" — EQ series only (BE etc. can't be traded intraday)
-export function parseDailyPriceFile(csvText: string): DailyPriceRow[] {
+export function parseDailyPriceFile(csvText: string, seriesToKeep: readonly string[] = ["EQ"]): DailyPriceRow[] {
   return csvText
     .split("\n")
     .slice(1)
     .map((line) => line.split(",").map((field) => field.trim()))
-    .filter((fields) => fields[1] === "EQ")
+    .filter((fields) => seriesToKeep.includes(fields[1]))
     .map((fields) => ({
       symbol: fields[0],
       prevClose: Number(fields[3]),
@@ -113,66 +113,74 @@ export function computeStockSignals(sessions: DailyPriceRow[][]): StockSignal[] 
     }
   }
 
-  const stockSignals: StockSignal[] = []
-  for (const latest of latestSession) {
-    const history = historyBySymbol.get(latest.symbol) ?? []
-    const priorSessions = history.slice(0, -1).slice(-20)
-    if (priorSessions.length < 5) continue // new listings: not enough history for averages
-    if (average(priorSessions.map((row) => row.turnoverLakhs)) < MIN_AVERAGE_TURNOVER_LAKHS) continue
+  const stockSignals = latestSession.flatMap((latest) => computeStockSignal(historyBySymbol.get(latest.symbol) ?? []) ?? [])
+  rankRelativeStrength(stockSignals)
+  return stockSignals
+}
 
-    const dailyRanges = history.slice(-14).map((row) => Math.max(row.high - row.low, Math.abs(row.high - row.prevClose), Math.abs(row.low - row.prevClose)))
-    const averageVolume = average(priorSessions.map((row) => row.volume))
-    const closes = history.map((row) => row.close)
-    const movingAverage = (sessionCount: number, sessionsAgo = 0) => {
-      const end = closes.length - sessionsAgo
-      return end >= sessionCount ? average(closes.slice(end - sessionCount, end)) : undefined
-    }
-    const [average50Day, average150Day, average200Day, average200DayMonthAgo] = [movingAverage(50), movingAverage(150), movingAverage(200), movingAverage(200, 20)]
-    const historyHigh = Math.max(...history.map((row) => row.high))
-    const historyLow = Math.min(...history.map((row) => row.low))
-    const isStage2Uptrend =
-      average50Day !== undefined && average150Day !== undefined && average200Day !== undefined && average200DayMonthAgo !== undefined &&
-      latest.close > average50Day && average50Day > average150Day && average150Day > average200Day && average200Day > average200DayMonthAgo &&
-      latest.close >= historyLow * 1.3 && latest.close >= historyHigh * 0.75
-    const changePercent3m = percentChange(history[Math.max(0, history.length - 64)].close, latest.close)
-    const annualisedVolatility = standardDeviation(history.slice(-MOMENTUM_6M_SESSIONS).map((row) => percentChange(row.prevClose, row.close))) * Math.sqrt(252)
-    const momentumScore = history.length > MOMENTUM_6M_SESSIONS && annualisedVolatility > 0
-      ? (percentChange(history[history.length - MOMENTUM_6M_SESSIONS - 1].close, latest.close) + changePercent3m) / 2 / annualisedVolatility
-      : undefined
-    const percentFromHigh = percentChange(historyHigh, latest.close)
-    const isTightRange = history.length >= 50 && priceRange(history.slice(-10)) <= 0.4 * priceRange(history.slice(-50)) && percentFromHigh >= -15
-    stockSignals.push({
-      symbol: latest.symbol,
-      close: latest.close,
-      changePercent1d: percentChange(latest.prevClose, latest.close),
-      changePercent5d: percentChange(history[Math.max(0, history.length - 6)].close, latest.close),
-      changePercent20d: percentChange(priorSessions[0].close, latest.close),
-      gapPercent: percentChange(latest.prevClose, latest.open),
-      volumeRatio: averageVolume > 0 ? latest.volume / averageVolume : 0,
-      averageVolume20Day: averageVolume,
-      deliveryPercent: latest.deliveryPercent,
-      averageDeliveryPercent: average(priorSessions.map((row) => row.deliveryPercent)),
-      averageDailyRange: average(dailyRanges),
-      isBreakout20d: latest.close > Math.max(...priorSessions.map((row) => row.high)),
-      isBreakdown20d: latest.close < Math.min(...priorSessions.map((row) => row.low)),
-      changePercent3m,
-      percentFromHigh,
-      isAbove200DayAverage: average200Day === undefined ? undefined : latest.close > average200Day,
-      isStage2Uptrend,
-      high: latest.high,
-      low: latest.low,
-      closePosition: latest.high > latest.low ? (latest.close - latest.low) / (latest.high - latest.low) : 0.5,
-      average20Day: movingAverage(20) ?? average(closes),
-      average50Day,
-      average200Day,
-      relativeStrengthRank: 0,
-      momentumScore,
-      isTightRange,
-    })
+// One stock on its latest session (history oldest → newest, ending today). undefined = illiquid or under 6 sessions.
+// Shared by the live scan and the backtest, so the tested signal is the one that runs.
+export function computeStockSignal(history: DailyPriceRow[], minTurnoverLakhs = MIN_AVERAGE_TURNOVER_LAKHS): StockSignal | undefined {
+  const latest = history[history.length - 1]
+  const priorSessions = history.slice(0, -1).slice(-20)
+  if (priorSessions.length < 5) return undefined // new listings: not enough history for averages
+  if (average(priorSessions.map((row) => row.turnoverLakhs)) < minTurnoverLakhs) return undefined
+
+  const dailyRanges = history.slice(-14).map((row) => Math.max(row.high - row.low, Math.abs(row.high - row.prevClose), Math.abs(row.low - row.prevClose)))
+  const averageVolume = average(priorSessions.map((row) => row.volume))
+  const closes = history.map((row) => row.close)
+  const movingAverage = (sessionCount: number, sessionsAgo = 0) => {
+    const end = closes.length - sessionsAgo
+    return end >= sessionCount ? average(closes.slice(end - sessionCount, end)) : undefined
   }
+  const [average50Day, average150Day, average200Day, average200DayMonthAgo] = [movingAverage(50), movingAverage(150), movingAverage(200), movingAverage(200, 20)]
+  const historyHigh = Math.max(...history.map((row) => row.high))
+  const historyLow = Math.min(...history.map((row) => row.low))
+  const isStage2Uptrend =
+    average50Day !== undefined && average150Day !== undefined && average200Day !== undefined && average200DayMonthAgo !== undefined &&
+    latest.close > average50Day && average50Day > average150Day && average150Day > average200Day && average200Day > average200DayMonthAgo &&
+    latest.close >= historyLow * 1.3 && latest.close >= historyHigh * 0.75
+  const changePercent3m = percentChange(history[Math.max(0, history.length - 64)].close, latest.close)
+  const annualisedVolatility = standardDeviation(history.slice(-MOMENTUM_6M_SESSIONS).map((row) => percentChange(row.prevClose, row.close))) * Math.sqrt(252)
+  const momentumScore = history.length > MOMENTUM_6M_SESSIONS && annualisedVolatility > 0
+    ? (percentChange(history[history.length - MOMENTUM_6M_SESSIONS - 1].close, latest.close) + changePercent3m) / 2 / annualisedVolatility
+    : undefined
+  const percentFromHigh = percentChange(historyHigh, latest.close)
+  const isTightRange = history.length >= 50 && priceRange(history.slice(-10)) <= 0.4 * priceRange(history.slice(-50)) && percentFromHigh >= -15
+  return {
+    symbol: latest.symbol,
+    close: latest.close,
+    changePercent1d: percentChange(latest.prevClose, latest.close),
+    changePercent5d: percentChange(history[Math.max(0, history.length - 6)].close, latest.close),
+    changePercent20d: percentChange(priorSessions[0].close, latest.close),
+    gapPercent: percentChange(latest.prevClose, latest.open),
+    volumeRatio: averageVolume > 0 ? latest.volume / averageVolume : 0,
+    averageVolume20Day: averageVolume,
+    deliveryPercent: latest.deliveryPercent,
+    averageDeliveryPercent: average(priorSessions.map((row) => row.deliveryPercent)),
+    averageDailyRange: average(dailyRanges),
+    isBreakout20d: latest.close > Math.max(...priorSessions.map((row) => row.high)),
+    isBreakdown20d: latest.close < Math.min(...priorSessions.map((row) => row.low)),
+    changePercent3m,
+    percentFromHigh,
+    isAbove200DayAverage: average200Day === undefined ? undefined : latest.close > average200Day,
+    isStage2Uptrend,
+    high: latest.high,
+    low: latest.low,
+    closePosition: latest.high > latest.low ? (latest.close - latest.low) / (latest.high - latest.low) : 0.5,
+    average20Day: movingAverage(20) ?? average(closes),
+    average50Day,
+    average200Day,
+    relativeStrengthRank: 0,
+    momentumScore,
+    isTightRange,
+  }
+}
+
+// RS rank 1–99 across the given stocks (sets relativeStrengthRank in place; 0 stays for under ~6 months of history)
+export function rankRelativeStrength(stockSignals: StockSignal[]): void {
   const ranked = stockSignals.filter((stock) => stock.momentumScore !== undefined).sort((a, b) => a.momentumScore! - b.momentumScore!)
   ranked.forEach((s, index) => { s.relativeStrengthRank = Math.max(1, Math.min(99, Math.round(((index + 1) / ranked.length) * 100))) })
-  return stockSignals
 }
 
 // Swing setups: Stage 2 + tight 10-day range, strongest RS first, stop 2 × the average daily range (ATR14), target 3R,
