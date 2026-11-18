@@ -9,7 +9,7 @@ import { fetchPriceAdjustments, adjustForCorporateActions } from "./adjust.js"
 import { SWING_RULES, LIVE_RISK_PERCENT, leadingSectors, liveRiskPercent, type MarketType, type StockDay, type StrategyName } from "./strategies.js"
 import { fetchRuleInputs } from "./rule-inputs.js"
 import { loadFundamentals } from "./fundamentals.js"
-import { longTermPicks, LIVE_SCREEN_NAMES } from "./screens.js"
+import { longTermPicks, LIVE_SCREEN_NAMES, type LongTermPick } from "./screens.js"
 
 // Scans every NSE EQ stock in code — Claude's WebFetch summarises pages with a small model, so it can't
 // reliably read a 400 KB file of ~2,600 stocks. The result is a compact text block for the market-analyst prompt.
@@ -381,7 +381,7 @@ function formatScanList(scanList: ScanList): string {
   return `### ${scanList.title} (${scanList.rule})\n${header}\n${rows.join("\n")}\n`
 }
 
-function formatPriceFileDate(date: Date): string {
+export function formatPriceFileDate(date: Date): string {
   const [year, month, day] = date.toISOString().slice(0, 10).split("-")
   return `${day}${month}${year}`
 }
@@ -642,19 +642,25 @@ async function formatOpenTrades(holdingSymbols: Set<string>, signalsBySymbol: Ma
   return lines.length ? ["### Your open trades from earlier report picks (code)", ...lines].join("\n") : ""
 }
 
+export interface ScanFlags { regime: string; buy: string[]; watch: string[]; longTerm: string[]; scanned: string[] }
+
 // Long-term screens on NSE's structured results filings (screens.ts) — every stock that passes, both screens first
-async function formatLongTermScreens(stockSignals: StockSignal[], yearOfSessions: DailyPriceRow[][]): Promise<string> {
+async function computeLongTermPicks(stockSignals: StockSignal[], yearOfSessions: DailyPriceRow[][]): Promise<LongTermPick[] | undefined> {
   const fundamentals = await loadFundamentals().catch((error: Error) => { console.error(`[market] fundamentals unavailable: ${error.message}`); return undefined })
-  if (!fundamentals) return "### ⚠️ Long-term screens unavailable today (fundamentals file couldn't be read) — say so in the report"
+  if (!fundamentals) return undefined
   const barsBySymbol = new Map<string, DailyPriceRow[]>()
   for (const session of yearOfSessions) for (const row of session) barsBySymbol.set(row.symbol, [...(barsBySymbol.get(row.symbol) ?? []), row])
   const now = Date.now()
-  const picks = longTermPicks(stockSignals.map((signal) => ({
+  return longTermPicks(stockSignals.map((signal) => ({
     symbol: signal.symbol,
     filings: (fundamentals.get(signal.symbol) ?? []).filter((filing) => parseNseTimestamp(filing.filedAt) <= now),
     rawPrice: signal.close, // today's close: no later split to undo
     bars: barsBySymbol.get(signal.symbol) ?? [],
   })))
+}
+
+function formatLongTermScreens(picks: LongTermPick[] | undefined): string {
+  if (!picks) return "### ⚠️ Long-term screens unavailable today (fundamentals file couldn't be read) — say so in the report"
   const percent = (value: number | undefined) => (value === undefined ? "—" : `${value >= 0 ? "+" : ""}${value.toFixed(0)}%`)
   const counts = LIVE_SCREEN_NAMES.map((name) => `${name}: ${picks.filter((pick) => pick.screens.includes(name)).length}`).join(" · ")
   return [
@@ -704,6 +710,15 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
   await recordPicks(latestDate, recordable.map((setup) => ({
     symbol: setup.symbol, entry: setup.entry, stopLoss: setup.stopLoss, target: setup.target, relativeStrengthRank: setup.relativeStrengthRank, lenses: setup.keys, regime: regime.label, strategy: setup.strategy, holdSessions: setup.holdSessions,
   })))
+  // what the scan said about each stock today — the evening scorecard groups the day's risers by it
+  const longTerm = await computeLongTermPicks(stockSignals, yearOfSessions)
+  await writeJson(`scan-flags/${todayIst()}.json`, {
+    regime: regime.label,
+    buy: ranked.filter((setup) => setup.kind === "buy").map((setup) => setup.symbol),
+    watch: ranked.filter((setup) => setup.kind === "watch").map((setup) => setup.symbol),
+    longTerm: (longTerm ?? []).map((pick) => pick.symbol),
+    scanned: stockSignals.map((signal) => signal.symbol),
+  } satisfies ScanFlags)
   return [
     `## Market scan — computed in code from NSE data`,
     `Latest session ${latestDate} · ${sessions[sessions.length - 1].length} stocks scanned (EQ series, ETFs excluded) · ${stockSignals.length} liquid (avg turnover ≥ ₹${MIN_AVERAGE_TURNOVER_LAKHS} lakh) · ${sessions.length} sessions of history · RS = relative-strength rank 1–99`,
@@ -713,7 +728,7 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
     [...lenses.unavailable, ...ruleInputs.unavailable].length ? `### ⚠️ NSE didn't return today: ${[...lenses.unavailable, ...ruleInputs.unavailable].join(", ")} — every check that depends on these is NOT VERIFIED (never treat it as "none")` : "",
     pricesAdjusted ? "" : "### ⚠️ NSE corporate actions didn't return — prices are NOT adjusted for splits/bonuses today; a stock with one in the last ~10 months can show a fake crash (wrong trend, RS and loser lists)",
     formatSwingSetups(ranked),
-    await formatLongTermScreens(stockSignals, yearOfSessions),
+    formatLongTermScreens(longTerm),
     newsCheckEvidence,
     formatHoldingsCheck(holdingSymbols, signalsBySymbol, lenses),
     await formatOpenTrades(holdingSymbols, signalsBySymbol),

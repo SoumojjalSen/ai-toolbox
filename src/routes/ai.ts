@@ -8,7 +8,7 @@ import { assertSkillExists } from "../skills.js"
 import { buildMarketScan } from "../services/market/scan.js"
 import { readHoldings } from "../services/market/holdings.js"
 import { parseReportPicks, splitFindingsLog } from "../services/market/scorecard.js"
-import { writeJson, todayIst, nseDate } from "../services/market/store.js"
+import { writeJson, writeText, todayIst, nseDate } from "../services/market/store.js"
 import { fetchHolidays } from "../services/market/ipo.js"
 import { log } from "../log.js"
 
@@ -66,6 +66,7 @@ router.post(
     if (skill === "market-analyst") {
       const { report, findings } = splitFindingsLog(aiResponse.text)
       aiResponse.text = report
+      await writeText(`reports/${todayIst()}.md`, report) // the evening scorecard checks every call in it
       const reportPicks = parseReportPicks(report)
       if (reportPicks.length) await writeJson(`report-picks/${todayIst()}.json`, reportPicks)
       if (findings.length) await writeJson(`findings/${todayIst()}.json`, findings)

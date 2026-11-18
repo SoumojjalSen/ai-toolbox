@@ -1,11 +1,12 @@
-import { loadStockSignals, type DailyPriceRow } from "./scan.js"
+import { loadStockSignals, parseDailyPriceFile, formatPriceFileDate, type DailyPriceRow, type ScanFlags } from "./scan.js"
+import { parseReportCalls, judgeCall, judgeOpen, groupRisers, whatWasSaid, type Verdict } from "./report-check.js"
 import { scorePick, buildTrackRecord, buyLimit, type ReportPick, type Finding } from "./scorecard.js"
 import { readHoldings } from "./holdings.js"
 import { fetchFilingHistory, fetchRecentResultsSymbols } from "./lenses.js"
 import { updateFundamentals } from "./fundamentals.js"
 import { fetchNseJson } from "./nse.js"
 import { STRONG_QIB, type IpoCallRecord } from "./ipo.js"
-import { readJson, listJson, todayIst, nseDate, parseNseDate } from "./store.js"
+import { readJson, readText, listJson, todayIst, nseDate, parseNseDate } from "./store.js"
 import type { MarketEmail } from "./alert.js"
 import { convertMarkdownToEmailHtml, markdownTable, tableCell } from "../../formats.js"
 
@@ -99,6 +100,9 @@ export async function buildEveningScorecard(): Promise<MarketEmail> {
   const sessionIndexOf = (isoDate: string) => sessionDates.indexOf(nseDate(new Date(`${isoDate}T12:00:00+05:30`)))
   const blocks: string[] = []
 
+  // 0. the morning's calls — right or wrong today — and every riser by what the system said that morning
+  blocks.push(...(await buildMorningCheck(todayBars, sessions)))
+
   // 1. system check first — it's what needs attention
   const systemCheck = await buildSystemCheck(sessionDates, sessions, sessionIndexOf)
   blocks.push(systemCheck.length ? markdownTable("## System check", "| Check | What happened | Detail |", systemCheck) : "## System check\n\n✅ Nothing flagged today.")
@@ -154,4 +158,85 @@ export async function buildEveningScorecard(): Promise<MarketEmail> {
   const markdown = [`# Scorecard — ${today}`, ...blocks].join("\n\n")
   const flagged = systemCheck.length ? ` — ${systemCheck.length} to check` : ""
   return { count: blocks.length, subject: `🧾 Scorecard — ${today}${flagged}`, html: convertMarkdownToEmailHtml(markdown) }
+}
+
+const SIGNIFICANT_RISE = 10 // %
+
+// Long-term picks are judged over 6–12 months; one line shows today against all stocks
+function longTermLine(verdicts: Verdict[], all: DailyPriceRow[]): string {
+  const moves = verdicts.filter((verdict) => verdict.call.kind === "long-term" && verdict.bar).map((verdict) => (verdict.bar!.close / verdict.bar!.prevClose - 1) * 100)
+  if (!moves.length) return ""
+  const average = (values: number[]) => values.reduce((total, value) => total + value, 0) / values.length
+  return `Long-term picks (${moves.length}, judged over 6–12 months): ${sign(average(moves))} on average today vs ${sign(average(all.map((bar) => (bar.close / bar.prevClose - 1) * 100)))} for all stocks.`
+}
+
+export async function buildMorningCheck(todayBars: Map<string, DailyPriceRow>, sessions: DailyPriceRow[][]): Promise<string[]> {
+  const report = await readText(`reports/${todayIst()}.md`)
+  const flags = await readJson<ScanFlags>(`scan-flags/${todayIst()}.json`)
+  const calls = report ? parseReportCalls(report) : []
+  const blocks: string[] = []
+
+  // a) the calls
+  if (!report) blocks.push("## Morning calls — were they right?\n\n⚠️ This morning's report wasn't saved — nothing to check.")
+  else {
+    const verdicts = calls.map((call) => judgeCall(call, todayBars.get(call.symbol)))
+    const nifty = (await fetchNseJson<{ data?: { index: string; open: number; previousClose: number }[] }>("allIndices"))?.data?.find((index) => index.index === "NIFTY 50")
+    const open = judgeOpen(report, nifty ? ((nifty.open - nifty.previousClose) / nifty.previousClose) * 100 : undefined)
+    const judged = verdicts.filter((verdict) => verdict.correct !== undefined)
+    const right = judged.filter((verdict) => verdict.correct).length
+    const all = [...todayBars.values()].filter((bar) => bar.prevClose > 0)
+    const roseShare = Math.round((all.filter((bar) => bar.close > bar.prevClose).length / Math.max(all.length, 1)) * 100)
+    const bySection = [...new Set(judged.map((verdict) => verdict.call.section))].map((section) => {
+      const ofSection = judged.filter((verdict) => verdict.call.section === section)
+      return `${section}: ${ofSection.filter((verdict) => verdict.correct).length} of ${ofSection.length} right`
+    })
+    const mark = (correct: boolean | undefined) => (correct === undefined ? "—" : correct ? "✅" : "❌")
+    blocks.push([
+      "## Morning calls — were they right?",
+      "",
+      `**${judged.length ? `${right} of ${judged.length} calls right (${Math.round((right / judged.length) * 100)}%)` : "No calls to judge today"}**${bySection.length ? ` — ${bySection.join(" · ")}` : ""}${open ? ` · Expected open "${open.expected}": ${open.result} ${mark(open.correct)}` : ""}.`,
+      "",
+      `For scale: ${roseShare}% of all stocks rose today, so guessing "up" for every stock was right ${roseShare}% of the time. Swing buys run for weeks — today shows them so far.`,
+      "",
+      longTermLine(verdicts, all),
+      "",
+      markdownTable("", "| Stock | Call | Today | Right? |", verdicts.filter((verdict) => verdict.call.kind !== "watch" && verdict.call.kind !== "long-term").map((verdict) =>
+        `| **${verdict.call.symbol}** | ${verdict.call.section}${verdict.call.kind === "up" ? " 🟢" : verdict.call.kind === "down" ? " 🔴" : ""} | ${verdict.result} | ${mark(verdict.correct)} |`)).replace(/^\n/, ""),
+    ].join("\n"))
+  }
+
+  // b) every riser, by what the system said that morning
+  const priceFile = await readText(`prices/${formatPriceFileDate(new Date(`${todayIst()}T12:00:00+05:30`))}.csv`)
+  if (!priceFile) return [...blocks, "## Risers today\n\n⚠️ Today's NSE price file isn't saved — the risers list is missing."]
+  const rows = ["EQ", "BE", "SM", "ST"].flatMap((series) => parseDailyPriceFile(priceFile, [series]).map((row) => ({ ...row, series })))
+  const risers = groupRisers(rows, calls, flags)
+  const groups = [...new Set(risers.map((riser) => riser.group))]
+  const bucket = (from: number, to: number) => risers.filter((riser) => riser.change >= from && riser.change < to)
+  const countsBy = (list: typeof risers) => groups.map((group) => [group, list.filter((riser) => riser.group === group).length] as const).filter(([, count]) => count).map(([group, count]) => `${group} ${count}`).join(" · ")
+  const significant = bucket(SIGNIFICANT_RISE, Infinity)
+  // over 2 and 5 sessions (main board, from the scan's history): 10%+ without a 10% day inside it
+  const multiDay = [2, 5].flatMap((days) => {
+    const before = sessions[sessions.length - 1 - days]
+    if (!before) return []
+    const closeBefore = new Map(before.map((row) => [row.symbol, row.close]))
+    return [...todayBars.values()].filter((bar) => closeBefore.get(bar.symbol) && !significant.some((riser) => riser.symbol === bar.symbol))
+      .map((bar) => ({ symbol: bar.symbol, days, change: (bar.close / closeBefore.get(bar.symbol)! - 1) * 100 }))
+      .filter((move) => move.change >= SIGNIFICANT_RISE)
+  }).filter((move, index, list) => list.findIndex((other) => other.symbol === move.symbol) === index).sort((a, b) => b.change - a.change)
+  blocks.push([
+    `## Risers today — ${risers.length} stocks rose (${significant.length} by ${SIGNIFICANT_RISE}%+)`,
+    "",
+    `By what the system said this morning — 10%+: ${countsBy(significant) || "none"}; 5–10%: ${countsBy(bucket(5, SIGNIFICANT_RISE)) || "none"}; under 5%: ${countsBy(bucket(0, 5)) || "none"}.`,
+    "",
+    markdownTable(`### Significant: up ${SIGNIFICANT_RISE}%+ today`, "| Stock | Today | Series | What the system said this morning |",
+      significant.map((riser) => `| 🟢 **${riser.symbol}** | ${sign(riser.change)} | ${riser.series} | ${riser.group} |`)),
+    "",
+    multiDay.length ? markdownTable(`### Also significant: up ${SIGNIFICANT_RISE}%+ over 2 or 5 sessions`, "| Stock | Rise | Over | What the system said this morning |",
+      multiDay.map((move) => `| **${move.symbol}** | ${sign(move.change)} | ${move.days} sessions | ${whatWasSaid(move.symbol, "EQ", calls, flags)} |`)) : "",
+    "",
+    `**Up 5–10%:** ${bucket(5, SIGNIFICANT_RISE).map((riser) => `${riser.symbol} ${sign(riser.change)}`).join(" · ") || "none"}`,
+    "",
+    `**Up 0–5%:** ${bucket(0, 5).length} stocks — ${bucket(0, 5).map((riser) => riser.symbol).join(", ")}`,
+  ].join("\n"))
+  return blocks
 }
