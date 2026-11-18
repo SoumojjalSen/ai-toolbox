@@ -6,10 +6,11 @@ import { readJson, writeJson, todayIst, nseDate, parseNseDate } from "./store.js
 import { findOpenTrades, tradeStatus, buyLimit, type ReportPick } from "./scorecard.js"
 import { convertMarkdownToEmailHtml, markdownTable as table, tableCell } from "../../formats.js"
 
-// Market check at 10:00 and 14:00 — code only, no AI. 10:00 is when the report's picks are bought: the opening
-// swings have settled, and setup stocks were on average 0.12% cheaper at 10:00 than at the 9:15 open (918 signals,
-// Aug–Oct 2026). What it's for: what to do now (buy/skip the picks, open trades at their stop/target, IPOs closing
-// today) and your holdings that are moving. No general movers list: on real data a stock already up or down 3%+ by
+// Market check at ~9:09 (pre-open) and 14:00 — code only, no AI. At 9:09 the pre-open auction has fixed each
+// stock's opening price (IEP), so the report's picks get buy/skip against their limit before trading starts at 9:15
+// (setup stocks were only 0.12% cheaper at 10:00 than at the open — waiting gains nothing). Every pre-open run also
+// saves the snapshot (opening price, buy and sell quantity for all ~2,200 stocks) to preopen/ for a later test of
+// whether pre-open buying predicts the day. No general movers list: on real data a stock already up or down 3%+ by
 // 10:00 was a coin flip afterwards (median +0.13% to the close, 54% rose; 466 cases, Aug–Oct 2026).
 
 const HOLDING_MOVE_PERCENT = 2
@@ -17,7 +18,10 @@ const HOLDING_MOVE_PERCENT = 2
 export interface LiveQuote { symbol: string; price: number; changePercent: number }
 
 interface NseTradedRow { symbol: string; series: string; lastPrice: number; pchange: number }
-interface NsePreOpenRow { metadata: { symbol: string; iep: number } }
+export interface NsePreOpenRow {
+  metadata: { symbol: string; iep: number; pChange: number; previousClose: number }
+  detail?: { preOpenMarket?: { totalBuyQuantity: number; totalSellQuantity: number } }
+}
 interface NseMarketStatus { marketState?: { market: string; tradeDate: string; last: number; percentChange: number }[] }
 
 // Every traded stock + the 9:08 opening price from the pre-open auction
@@ -41,6 +45,37 @@ async function fetchLiveMarket() {
     nifty: capitalMarket ? { last: capitalMarket.last, changePercent: capitalMarket.percentChange } : undefined,
     risingSinceOpen: sinceOpen.filter((quote) => quote.price > openPrice.get(quote.symbol)!).length,
     fallingSinceOpen: sinceOpen.filter((quote) => quote.price < openPrice.get(quote.symbol)!).length,
+  }
+}
+
+// Before 9:15 the price is the pre-open opening price (IEP); stocks with no IEP (no orders) are left out
+export function preOpenQuotes(rows: NsePreOpenRow[]): Map<string, LiveQuote> {
+  return new Map(rows.filter(({ metadata }) => metadata.iep > 0)
+    .map(({ metadata }) => [metadata.symbol, { symbol: metadata.symbol, price: metadata.iep, changePercent: metadata.pChange }]))
+}
+
+export interface PreOpenSnapshotRow { symbol: string; iep: number; previousClose: number; buyQuantity: number; sellQuantity: number }
+export function preOpenSnapshot(rows: NsePreOpenRow[]): PreOpenSnapshotRow[] {
+  return rows.map(({ metadata, detail }) => ({
+    symbol: metadata.symbol, iep: metadata.iep, previousClose: metadata.previousClose,
+    buyQuantity: detail?.preOpenMarket?.totalBuyQuantity ?? 0, sellQuantity: detail?.preOpenMarket?.totalSellQuantity ?? 0,
+  }))
+}
+
+async function fetchPreOpenMarket() {
+  const [preOpen, status] = await Promise.all([
+    fetchNseJson<{ data?: NsePreOpenRow[] }>("market-data-pre-open?key=ALL"),
+    fetchNseJson<NseMarketStatus>("marketStatus"),
+  ])
+  const rows = preOpen?.data ?? []
+  const quotes = preOpenQuotes(rows)
+  const capitalMarket = status?.marketState?.find((state) => state.market === "Capital Market")
+  const isTradingDay = capitalMarket?.tradeDate.startsWith(nseDate()) ?? false
+  if (isTradingDay && rows.length) await writeJson(`preopen/${todayIst()}.json`, preOpenSnapshot(rows))
+  return {
+    quotes, isTradingDay, nifty: undefined,
+    risingSinceOpen: [...quotes.values()].filter((quote) => quote.changePercent > 0).length,
+    fallingSinceOpen: [...quotes.values()].filter((quote) => quote.changePercent < 0).length,
   }
 }
 
@@ -115,9 +150,10 @@ const chart = (symbol: string) => `[chart](https://www.tradingview.com/chart/?sy
 export interface MarketEmail { count: number; subject: string; html: string }
 
 export async function buildMarketCheck(): Promise<MarketEmail> {
-  const [live, lenses, holdings, names] = await Promise.all([fetchLiveMarket(), fetchMarketLenses(), readHoldings(), loadCompanyNames()])
-  if (!live.isTradingDay || !live.quotes.size) return { count: 0, subject: "", html: "" } // weekend or holiday
   const timeIst = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(11, 16)
+  const isPreOpen = timeIst < "09:15"
+  const [live, lenses, holdings, names] = await Promise.all([isPreOpen ? fetchPreOpenMarket() : fetchLiveMarket(), fetchMarketLenses(), readHoldings(), loadCompanyNames()])
+  if (!live.isTradingDay || !live.quotes.size) return { count: 0, subject: "", html: "" } // weekend or holiday
   const eventsFor = (symbol: string) => lenses.events.filter((event) => event.symbol === symbol)
   const doNow: string[] = []
   const blocks: string[] = []
@@ -133,7 +169,7 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
     const skips = decisions.filter(({ decision }) => !decision.startsWith("✅"))
     if (buys.length) doNow.push(`**Buy** (limit order): ${buys.map(({ pick }) => `${pick.symbol} ≤ ₹${buyLimit(pick)}`).join(" · ")}`)
     if (skips.length) doNow.push(`**Skip today:** ${skips.map(({ pick, decision }) => `${pick.symbol} (${decision.replace(/^\S+\s*/, "").split(" — ")[0]})`).join(" · ")}`)
-    blocks.push(table(`## Today's picks — live ${timeIst}`, "| Stock | Now | Entry · SL | Decision |",
+    blocks.push(table(`## Today's picks — ${isPreOpen ? "opening price (pre-open)" : "live"} ${timeIst}`, "| Stock | Now | Entry · SL | Decision |",
       decisions.map(({ pick, quote, decision }) =>
         `| ${decision.startsWith("✅") ? "🟢" : "🔴"} **${pick.symbol}** ${chart(pick.symbol)} | ${quote ? `₹${quote.price} (${sign(quote.changePercent)})` : "—"} | ₹${pick.entry} · SL ₹${pick.stopLoss} | ${decision} |`)))
   }
@@ -181,7 +217,9 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
 
   const marketLine = [
     live.nifty ? `Nifty ${sign(live.nifty.changePercent)}` : "",
-    `${live.risingSinceOpen} stocks rising vs ${live.fallingSinceOpen} falling since the open`,
+    isPreOpen
+      ? `${live.risingSinceOpen} stocks set to open higher vs ${live.fallingSinceOpen} lower`
+      : `${live.risingSinceOpen} stocks rising vs ${live.fallingSinceOpen} falling since the open`,
   ].filter(Boolean).join(" · ")
   const markdown = [
     `# Market check — ${timeIst}`,

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { pickExplainingHeadline, shortCompanyName, searchNames, buyOrSkip, type LiveQuote } from "../../src/services/market/alert.js"
+import { pickExplainingHeadline, shortCompanyName, searchNames, buyOrSkip, preOpenQuotes, preOpenSnapshot, type LiveQuote, type NsePreOpenRow } from "../../src/services/market/alert.js"
 import { parseReportPicks } from "../../src/services/market/scorecard.js"
 
 const quote = (price: number): LiveQuote => ({ symbol: "X", price, changePercent: 0 })
@@ -52,4 +52,21 @@ test("searchNames: two companies sharing a short name both get their longer name
   const names = searchNames([["TMPV", "Tata Motors Passenger Vehicles Limited"], ["TMCV", "Tata Motors Limited"], ["RELIANCE", "Reliance Industries Limited"]])
   assert.deepEqual(Object.fromEntries(names), { TMPV: "Tata Motors Passenger", TMCV: "Tata Motors", RELIANCE: "Reliance Industries" })
   assert.equal(pickExplainingHeadline(["Tata Motors CV Q2 results: profitability returns - ET"], names.get("TMPV")!), undefined)
+})
+
+// NSE pre-open rows, 18 Nov 2026 (first row as NSE sent it; the second has no orders yet)
+const preOpenRows: NsePreOpenRow[] = [
+  { metadata: { symbol: "SUMEDHA", iep: 46.34, pChange: 19.99, previousClose: 38.62 }, detail: { preOpenMarket: { totalBuyQuantity: 1042, totalSellQuantity: 510 } } },
+  { metadata: { symbol: "QUIET", iep: 0, pChange: 0, previousClose: 120 } },
+]
+
+test("preOpenQuotes: the opening price (IEP) is the price before 9:15; stocks without one are left out", () => {
+  assert.deepEqual([...preOpenQuotes(preOpenRows).values()], [{ symbol: "SUMEDHA", price: 46.34, changePercent: 19.99 }])
+})
+
+test("preOpenSnapshot keeps opening price and buy/sell quantity for every stock, 0 when NSE sent none", () => {
+  assert.deepEqual(preOpenSnapshot(preOpenRows), [
+    { symbol: "SUMEDHA", iep: 46.34, previousClose: 38.62, buyQuantity: 1042, sellQuantity: 510 },
+    { symbol: "QUIET", iep: 0, previousClose: 120, buyQuantity: 0, sellQuantity: 0 },
+  ])
 })

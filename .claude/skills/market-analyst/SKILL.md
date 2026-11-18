@@ -44,7 +44,7 @@ Your training knowledge is OUTDATED for prices, events and IPOs. Every number, e
 Read as an email on a phone. Layout rules:
 - **Stock tables have 4 columns: Stock · Action · Levels · Analysis & proof.**
   - **Action:** "🟢 Buy" / "🔴 Exit" / "🔴 Avoid" / "Watch".
-  - **Levels:** `₹entry → ₹target · SL ₹stop · by <date ~6 weeks out>` — exactly this format: the 10:00 email and the evening scorecard read the picks from it.
+  - **Levels:** `₹entry → ₹target · SL ₹stop · by <date ~6 weeks out>` — exactly this format: the 9:09 pre-open email and the evening scorecard read the picks from it.
   - **Analysis & proof:** ≤ 25 words as 2–4 short points separated by " · " (each point becomes a bullet in the email) — the lenses that agree and the news check, each with its proof link: trend/price claims → `[chart](https://www.tradingview.com/chart/?symbol=NSE:<SYMBOL>)`; filings → the NSE PDF link; news → the article; fundamentals → Screener.in. E.g. "RS 97, Stage 2, tight 10-day range [chart] · ₹450 cr order [NSE] · no bad news".
 - Start an Action/verdict cell with 🟢 or 🔴 (renders green/red). **Row tint:** start the *Stock* cell with 🟢 / 🔴 for buy / exit-avoid rows and IPOs to apply / avoid.
 - **Callouts:** market-closed or data-gap notice → `> ⚠️ …` (amber). Market today → `> …` (grey).
@@ -54,10 +54,10 @@ Read as an email on a phone. Layout rules:
 
 Start with a green callout **Do now** — at most 5 short lines, the actions only:
 `> 🟢 **Do now**` then **one bullet per action**, each on its own `> - ` line, e.g.:
-`> - **Buy** at ~10:00 (limit): STOCKA, STOCKB — the 10:00 email confirms each at the live price`
+`> - **Buy** at the 9:15 open (limit): STOCKA, STOCKB — the 9:09 email confirms each at its opening price`
 `> - **Exit:** STOCKC`
 `> - **IPO:** <IPO A> — apply (QIB already 47×) · <IPO B> — likely skip, confirm at 16:15` Nothing passed → "No buys today — nothing passed every check". Neutral or weak market → add "(<half/quarter> size — market <neutral/weak>)" to the Buy line.
-Only when there are picks, one line: "Buy at about **10:00** with a limit order no higher than 1% above the entry — the 10:00 email checks each at the live price. Hold until the target, the stop loss or the sell-by date. Quantity = (<risk %> of capital) ÷ (entry − stop loss)." with the regime's risk % (1% / 0.5% / 0.25%).
+Only when there are picks, one line: "Place a limit order for the **9:15 open**, no higher than 1% above the entry — the 9:09 email shows each pick's opening price; if it opens above the limit the order doesn't fill (skip). Set the stop loss and target as a GTT order. Hold until the target, the stop loss or the sell-by date. Quantity = (<risk %> of capital) ÷ (entry − stop loss)." with the regime's risk % (1% / 0.5% / 0.25%).
 
 ### 1. Swing picks (hold up to ~6 weeks) — news-checked
 **Every** `go` pick, most lenses first, then RS. Stock table. Analysis & proof = the key finding of the news check (latest results in one phrase, e.g. "Q2 profit +38%") + the agreeing lenses, ending with confidence (High / Medium / Low; always Low in a neutral or weak market). Neutral or weak market → first line: "Market <neutral/weak> — <half/quarter> size: risk <0.5%/0.25%> of capital per trade." Below it: "Dropped after the news check: SYMBOL — reason" for each drop.

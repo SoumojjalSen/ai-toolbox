@@ -6,7 +6,7 @@ import { buildIpoFinal } from "../services/market/ipo.js"
 
 const router = Router()
 
-// n8n calls these on schedule and emails `html` when `count` > 0 (0 on holidays): market check 10:00 and 14:00,
+// n8n calls these on schedule and emails `html` when `count` > 0 (0 on holidays): market check 9:09 (pre-open) and 14:00,
 // IPO final call 16:15 (closing days only), scorecard 19:30 once NSE's daily price file is out
 router.get(
   "/market/alert",

@@ -61,7 +61,7 @@ router.post(
     const promptWithContext = await appendSkillContext(prependTodaysDate(prompt), skill)
     const fullPrompt = appendFormatInstructions(prependSkillCommand(promptWithContext, skill), format)
     const aiResponse = await generateAiResponse(fullPrompt, images, system)
-    // the 10:00 alert (buy or skip) and the evening scorecard work from the report's actual picks; the findings
+    // the 9:09 pre-open alert (buy or skip) and the evening scorecard work from the report's actual picks; the findings
     // log is saved for tomorrow's news check and kept out of the email
     if (skill === "market-analyst") {
       const { report, findings } = splitFindingsLog(aiResponse.text)
