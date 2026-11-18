@@ -71,3 +71,6 @@ jobs:
             cd ~/apps/server-config
             docker-compose pull ai-toolbox
             docker-compose up -d ai-toolbox
+            # the image it replaced is now unused — remove it (43 left behind had filled ~11 GB of the disk);
+            # every version stays on ghcr.io under its commit SHA for a rollback
+            docker image prune -f
