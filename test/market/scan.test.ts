@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseDailyPriceFile, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, type DailyPriceRow } from "../../src/services/market/scan.js"
+import { parseDailyPriceFile, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, formatRegime, type DailyPriceRow, type Regime } from "../../src/services/market/scan.js"
 
 function makeSession(close: number, volume: number, overrides: Partial<DailyPriceRow> = {}): DailyPriceRow {
   return { symbol: "ACME", prevClose: close, open: close, high: close + 1, low: close - 1, close, volume, turnoverLakhs: 100, deliveryPercent: 40, ...overrides }
@@ -76,4 +76,12 @@ test("assessRegime: broad 4% up-moves with most stocks above the 50-day = strong
   assert.equal(assessRegime(computeStockSignals(up), up).label, "strong")
   const down = build(-1)
   assert.equal(assessRegime(computeStockSignals(down), down).label, "weak")
+})
+
+test("formatRegime: every market type buys, sized down outside a strong market (never a block)", () => {
+  const regime = (label: Regime["label"]): Regime => ({ label, percentAbove50: 50, percentAbove200: 50, upMoves5d: 10, downMoves5d: 10 })
+  assert.match(formatRegime(regime("strong"), ""), /STRONG → BUY: risk 1% of capital per trade/)
+  assert.match(formatRegime(regime("neutral"), ""), /NEUTRAL → BUY at half size: risk 0\.5% of capital per trade/)
+  assert.match(formatRegime(regime("weak"), ""), /WEAK → BUY at quarter size: risk 0\.25% of capital per trade/)
+  for (const label of ["strong", "neutral", "weak"] as const) assert.doesNotMatch(formatRegime(regime(label), ""), /NO NEW BUYS/)
 })

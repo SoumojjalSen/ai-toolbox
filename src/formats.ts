@@ -127,7 +127,7 @@ const GLOSSARY: [RegExp, string, string][] = [
   [/\bFII\b|\bFPI\b|\bDII\b/, "FII / DII", "foreign / Indian institutions — their daily net buying or selling"],
   [/GIFT Nifty/i, "GIFT Nifty", "Nifty futures traded before India opens — an early sign of the open"],
   [/\bVIX\b/, "VIX", "the market's fear gauge — above 20 means a nervous market"],
-  [/\bregime\b|market mood/i, "Market mood", "strong / neutral / weak, from how many stocks are rising — buys only when strong"],
+  [/\bregime\b|market mood/i, "Market mood", "strong / neutral / weak, from how many stocks are rising — sets the size of each buy"],
 ]
 
 export function buildGlossary(markdown: string): string {

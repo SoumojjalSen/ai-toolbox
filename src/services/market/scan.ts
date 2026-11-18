@@ -177,9 +177,10 @@ export function computeStockSignals(sessions: DailyPriceRow[][]): StockSignal[] 
 // Swing setups: Stage 2 + tight 10-day range, strongest RS first, stop 2 × the average daily range (ATR14), target 3R,
 // hold ≤ 30 sessions. Backtest on NSE daily price files (Jul 2023 → Oct 2026, signals from May 2024, entry at the next
 // open, 0.25% round-trip cost, top 10 a day): −0.05R a trade overall — the rule only made money in a STRONG market
-// (+0.04R, or +0.15R leaving out stocks with a split/bonus nearby); neutral −0.10R, weak −0.08R. So: buys only when
-// the regime is strong (see RISK_BY_REGIME). An earlier one-year test (Oct 2025 → Oct 2026) showed +0.24R; it didn't
-// hold over three years. 20-day breakouts, episodic pivots, loser bounces and intraday setups all lost money after
+// (+0.04R, or +0.15R leaving out stocks with a split/bonus nearby); neutral −0.10R, weak −0.08R. That test's code
+// wasn't kept and it used prices not adjusted for splits/bonuses, so it can't be reproduced — the regime sizes the
+// buys instead of blocking them (see RISK_BY_REGIME) until a new backtest sets the sizes. An earlier one-year test
+// (Oct 2025 → Oct 2026) showed +0.24R; it didn't hold over three years. 20-day breakouts, episodic pivots, loser bounces and intraday setups all lost money after
 // costs — they stay as context lists, never as picks.
 const SWING_STOP_ATR = 2
 const REWARD_TO_RISK = 3
@@ -226,7 +227,7 @@ export function rankSwingSetups(stockSignals: StockSignal[]): TradeSetup[] {
     .sort((a, b) => (a.kind === b.kind ? b.relativeStrengthRank - a.relativeStrengthRank : a.kind === "core" ? -1 : 1))
 }
 
-// Market regime from breadth (O'Neil's "M", Stockbee's 4% counts) — decides whether to buy at all (see above).
+// Market regime from breadth (O'Neil's "M", Stockbee's 4% counts) — sets how much to risk per buy (see above).
 export interface Regime {
   label: "strong" | "neutral" | "weak"
   percentAbove50: number
@@ -257,15 +258,15 @@ export function assessRegime(stockSignals: StockSignal[], sessions: DailyPriceRo
   return { label, percentAbove50, percentAbove200, upMoves5d, downMoves5d }
 }
 
-// No cap on the number of picks in a strong market — every setup that passes all checks is a pick. Neutral and weak:
-// no new buys; setups go on the watchlist until the regime turns strong (3-year backtest above: they lost money).
+// No cap on the number of picks in any regime — every setup that passes all checks is a pick, sized by the regime.
+// Interim sizes until the planned backtest replaces them; outside a strong market picks are low confidence.
 const RISK_BY_REGIME: Record<Regime["label"], string> = {
   strong: "BUY: risk 1% of capital per trade",
-  neutral: "NO NEW BUYS — setups go on the watchlist (3-year backtest: neutral-market picks lost −0.10R a trade)",
-  weak: "NO NEW BUYS — setups go on the watchlist (3-year backtest: weak-market picks lost −0.08R a trade)",
+  neutral: "BUY at half size: risk 0.5% of capital per trade — low confidence (rule not re-tested in a neutral market)",
+  weak: "BUY at quarter size: risk 0.25% of capital per trade — low confidence (rule not re-tested in a weak market)",
 }
 
-function formatRegime(regime: Regime, vixLine: string): string {
+export function formatRegime(regime: Regime, vixLine: string): string {
   return [
     `### Market regime (code): ${regime.label.toUpperCase()} → ${RISK_BY_REGIME[regime.label]}`,
     `${regime.percentAbove50.toFixed(0)}% of liquid stocks above their 50-day average, ${regime.percentAbove200.toFixed(0)}% above the 200-day; last 5 sessions: ${regime.upMoves5d} moves of +4% or more vs ${regime.downMoves5d} of −4% or more${vixLine}`,
@@ -479,7 +480,7 @@ function formatSwingSetups(ranked: RankedSetup[]): string {
   const core = rows("core")
   const leaders = rows("leader")
   return [
-    `### Swing setups — CORE (Stage 2 + tight range; bought only in a strong market; stop 2×ATR, target 3R, sell by ~${SWING_HOLD_SESSIONS} sessions) — ${core.total} qualified, top ${core.lines.length}`,
+    `### Swing setups — CORE (Stage 2 + tight range; sized by the market regime; stop 2×ATR, target 3R, sell by ~${SWING_HOLD_SESSIONS} sessions) — ${core.total} qualified, top ${core.lines.length}`,
     "Skip a setup if it trades more than 1% above entry at buy time (don't chase).",
     header, ...core.lines,
     `### Swing WATCHLIST — leaders (Stage 2 + RS ≥ ${LEADER_MIN_RELATIVE_STRENGTH}, not tight yet — watch, not a buy) — ${leaders.total} qualified, top ${leaders.lines.length}`,
