@@ -1,7 +1,7 @@
 import { fetchNse, fetchNseJson } from "./nse.js"
 import { fetchMarketLenses, type EventKind } from "./lenses.js"
 import { readHoldings } from "./holdings.js"
-import { buildIpoClosingToday } from "./ipo.js"
+import { buildIpoClosingToday, fetchHolidays } from "./ipo.js"
 import { readJson, writeJson, todayIst, nseDate, parseNseDate } from "./store.js"
 import { findOpenTrades, tradeStatus, buyLimit, type ReportPick } from "./scorecard.js"
 import { convertMarkdownToEmailHtml, markdownTable as table, tableCell } from "../../formats.js"
@@ -62,15 +62,19 @@ export function preOpenSnapshot(rows: NsePreOpenRow[]): PreOpenSnapshotRow[] {
   }))
 }
 
+// Before trading starts, NSE's market status can still carry yesterday's date — the weekday and NSE's holiday list
+// decide instead. An unavailable holiday list counts every weekday as a trading day (better an email than none).
+export function isTradingDayIst(now: Date, holidays: Set<string>): boolean {
+  const weekday = new Date(now.getTime() + 5.5 * 3_600_000).getUTCDay()
+  return weekday !== 0 && weekday !== 6 && !holidays.has(nseDate(now))
+}
+
 async function fetchPreOpenMarket() {
-  const [preOpen, status] = await Promise.all([
-    fetchNseJson<{ data?: NsePreOpenRow[] }>("market-data-pre-open?key=ALL"),
-    fetchNseJson<NseMarketStatus>("marketStatus"),
-  ])
+  const [preOpen, holidays] = await Promise.all([fetchNseJson<{ data?: NsePreOpenRow[] }>("market-data-pre-open?key=ALL"), fetchHolidays()])
+  if (!holidays.size) console.error("[market] NSE holiday list unavailable — treating today as a trading day")
   const rows = preOpen?.data ?? []
   const quotes = preOpenQuotes(rows)
-  const capitalMarket = status?.marketState?.find((state) => state.market === "Capital Market")
-  const isTradingDay = capitalMarket?.tradeDate.startsWith(nseDate()) ?? false
+  const isTradingDay = isTradingDayIst(new Date(), holidays)
   if (isTradingDay && rows.length) await writeJson(`preopen/${todayIst()}.json`, preOpenSnapshot(rows))
   return {
     quotes, isTradingDay, nifty: undefined,

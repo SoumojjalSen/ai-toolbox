@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { pickExplainingHeadline, shortCompanyName, searchNames, buyOrSkip, preOpenQuotes, preOpenSnapshot, type LiveQuote, type NsePreOpenRow } from "../../src/services/market/alert.js"
+import { pickExplainingHeadline, shortCompanyName, searchNames, buyOrSkip, preOpenQuotes, preOpenSnapshot, isTradingDayIst, type LiveQuote, type NsePreOpenRow } from "../../src/services/market/alert.js"
 import { parseReportPicks } from "../../src/services/market/scorecard.js"
 
 const quote = (price: number): LiveQuote => ({ symbol: "X", price, changePercent: 0 })
@@ -69,4 +69,11 @@ test("preOpenSnapshot keeps opening price and buy/sell quantity for every stock,
     { symbol: "SUMEDHA", iep: 46.34, previousClose: 38.62, buyQuantity: 1042, sellQuantity: 510 },
     { symbol: "QUIET", iep: 0, previousClose: 120, buyQuantity: 0, sellQuantity: 0 },
   ])
+})
+
+test("isTradingDayIst: weekdays that aren't NSE holidays; the IST date decides (03:39 UTC Thu = 9:09 IST Thu)", () => {
+  const thursday909 = new Date("2026-11-19T03:39:00Z")
+  assert.equal(isTradingDayIst(thursday909, new Set()), true)
+  assert.equal(isTradingDayIst(thursday909, new Set(["19-Nov-2026"])), false)
+  assert.equal(isTradingDayIst(new Date("2026-11-21T03:39:00Z"), new Set()), false) // Saturday
 })
