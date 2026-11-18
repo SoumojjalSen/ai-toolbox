@@ -5,6 +5,7 @@ import { fetchNse, fetchNseJson } from "./nse.js"
 import { fetchMarketLenses, fetchFilingHistory, fetchResultsLine, type EventKind, type MarketLenses } from "./lenses.js"
 import { readJson, writeJson, todayIst, nseDate, parseNseDate, listJson, readText, writeText, listFiles, deleteFile } from "./store.js"
 import { recordPicks, buildTrackRecord, findOpenTrades, tradeStatus } from "./scorecard.js"
+import { fetchPriceAdjustments, adjustForCorporateActions } from "./adjust.js"
 
 // Scans every NSE EQ stock in code — Claude's WebFetch summarises pages with a small model, so it can't
 // reliably read a 400 KB file of ~2,600 stocks. The result is a compact text block for the market-analyst prompt.
@@ -589,13 +590,16 @@ async function formatOpenTrades(holdingSymbols: Set<string>, signalsBySymbol: Ma
 // Daily price history (NSE bhavcopy) minus ETFs, with signals — shared by the morning scan, the market check and the scorecard (cached after the first call)
 export async function loadStockSignals() {
   const etfSymbols = await fetchEtfSymbols()
-  const { sessionDates, sessions: allSessions } = await fetchRecentSessions()
-  const sessions = allSessions.map((session) => session.filter((row) => !etfSymbols.has(row.symbol)))
-  return { etfSymbols, sessionDates, sessions, stockSignals: computeStockSignals(sessions) }
+  const { sessionDates, sessions: rawSessions } = await fetchRecentSessions()
+  const adjustments = await fetchPriceAdjustments(new Date(parseNseDate(sessionDates[0])))
+  if (!adjustments) console.error("[market] NSE corporate actions unavailable — prices not adjusted for splits/bonuses")
+  const sessions = adjustForCorporateActions(rawSessions, sessionDates, adjustments ?? [])
+    .map((session) => session.filter((row) => !etfSymbols.has(row.symbol)))
+  return { etfSymbols, sessionDates, sessions, stockSignals: computeStockSignals(sessions), pricesAdjusted: !!adjustments }
 }
 
 export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): Promise<string> {
-  const [{ etfSymbols, sessionDates, sessions, stockSignals }, lenses, ipoBrief] = await Promise.all([loadStockSignals(), fetchMarketLenses(), buildIpoBrief(holdingSymbols)])
+  const [{ etfSymbols, sessionDates, sessions, stockSignals, pricesAdjusted }, lenses, ipoBrief] = await Promise.all([loadStockSignals(), fetchMarketLenses(), buildIpoBrief(holdingSymbols)])
   const marketContext = await fetchMarketContext(etfSymbols)
   const signalsBySymbol = new Map(stockSignals.map((stock) => [stock.symbol, stock]))
   const excluded = new Map<string, string>()
@@ -622,6 +626,7 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
     await buildTrackRecord(sessionDates, sessions),
     marketContext.text,
     lenses.unavailable.length ? `### ⚠️ NSE didn't return today: ${lenses.unavailable.join(", ")} — every check that depends on these is NOT VERIFIED (never treat it as "none")` : "",
+    pricesAdjusted ? "" : "### ⚠️ NSE corporate actions didn't return — prices are NOT adjusted for splits/bonuses today; a stock with one in the last ~10 months can show a fake crash (wrong trend, RS and loser lists)",
     formatSwingSetups(ranked),
     newsCheckEvidence,
     formatHoldingsCheck(holdingSymbols, signalsBySymbol, lenses),
