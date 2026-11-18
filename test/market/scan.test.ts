@@ -1,6 +1,7 @@
 import { test } from "node:test"
+import type { StockDay } from "../../src/services/market/strategies.js"
 import assert from "node:assert/strict"
-import { parseDailyPriceFile, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, formatRegime, type DailyPriceRow, type Regime } from "../../src/services/market/scan.js"
+import { parseDailyPriceFile, computeStockSignals, buildScanLists, buildSwingSetup, rankSwingSetups, assessRegime, formatRegime, type DailyPriceRow, type Regime, type StockSignal } from "../../src/services/market/scan.js"
 
 function makeSession(close: number, volume: number, overrides: Partial<DailyPriceRow> = {}): DailyPriceRow {
   return { symbol: "ACME", prevClose: close, open: close, high: close + 1, low: close - 1, close, volume, turnoverLakhs: 100, deliveryPercent: 40, ...overrides }
@@ -52,18 +53,35 @@ test("RS rank orders stocks by volatility-adjusted momentum; a tight Stage 2 upt
   assert.equal(bySymbol.get("STRONG")!.isStage2Uptrend, true)
   assert.equal(bySymbol.get("STRONG")!.isTightRange, true)
 
-  const setup = buildSwingSetup(bySymbol.get("STRONG")!)!
-  assert.equal(setup.kind, "core")
+  const setup = buildSwingSetup(dayOf(bySymbol.get("STRONG")!), "strong")!
+  assert.equal(setup.kind, "buy")
+  assert.equal(setup.strategy, "stage2-tight")
+  assert.equal(setup.riskPercent, 1)
   const risk = setup.entry - setup.stopLoss
   assert.ok(Math.abs(risk - 2 * bySymbol.get("STRONG")!.averageDailyRange) < 0.1)
   assert.ok(Math.abs((setup.target - setup.entry) / risk - 3) < 0.05)
-  assert.equal(rankSwingSetups(signals)[0].symbol, "STRONG")
+  assert.equal(rankSwingSetups(signals.map((signal) => dayOf(signal)), "strong")[0].symbol, "STRONG")
+})
+
+// a stock's day with no events: only price rules can fire
+function dayOf(signal: StockSignal, overrides: Partial<StockDay> = {}): StockDay {
+  return { bars: [], signal, board: "main", sessionsSinceListing: undefined, resultsFiledAfterLastClose: false, resultsFiledAfterTodaysClose: false, insiderBuyValueToday: 0, inLeadingSector: false, ...overrides }
+}
+
+test("market type sets what is bought: rules buy only in a strong market; elsewhere they go on the watchlist", () => {
+  const [signal] = computeStockSignals(tightUptrend())
+  assert.equal(buildSwingSetup(dayOf(signal), "neutral")!.kind, "watch")
+  assert.equal(buildSwingSetup(dayOf(signal), "weak")!.riskPercent, 0)
+  const insider = buildSwingSetup(dayOf(signal, { insiderBuyValueToday: 1_00_00_000 }), "strong")!
+  assert.deepEqual([insider.kind, insider.strategy, insider.riskPercent, insider.holdSessions], ["buy", "insider-buy", 1, 60])
+  assert.equal(buildSwingSetup(dayOf(signal, { insiderBuyValueToday: 1_00_00_000 }), "weak")!.kind, "watch")
+  assert.equal(buildSwingSetup(dayOf(signal, { board: "sme" }), "strong")!.kind, "watch") // SME rules didn't pass the backtest
 })
 
 test("a stock below its 200-day average is never a swing setup", () => {
   const sessions = tightUptrend()
   sessions[219] = [makeSession(150, 1000, { prevClose: 205 })]
-  assert.equal(buildSwingSetup(computeStockSignals(sessions)[0]), undefined)
+  assert.equal(buildSwingSetup(dayOf(computeStockSignals(sessions)[0]), "strong"), undefined)
 })
 
 test("assessRegime: broad 4% up-moves with most stocks above the 50-day = strong; the mirror image = weak", () => {
@@ -78,10 +96,9 @@ test("assessRegime: broad 4% up-moves with most stocks above the 50-day = strong
   assert.equal(assessRegime(computeStockSignals(down), down).label, "weak")
 })
 
-test("formatRegime: every market type buys, sized down outside a strong market (never a block)", () => {
+test("formatRegime says what today's market type allows, from the live size table", () => {
   const regime = (label: Regime["label"]): Regime => ({ label, percentAbove50: 50, percentAbove200: 50, upMoves5d: 10, downMoves5d: 10 })
-  assert.match(formatRegime(regime("strong"), ""), /STRONG → BUY: risk 1% of capital per trade/)
-  assert.match(formatRegime(regime("neutral"), ""), /NEUTRAL → BUY at half size: risk 0\.5% of capital per trade/)
-  assert.match(formatRegime(regime("weak"), ""), /WEAK → BUY at quarter size: risk 0\.25% of capital per trade/)
-  for (const label of ["strong", "neutral", "weak"] as const) assert.doesNotMatch(formatRegime(regime(label), ""), /NO NEW BUYS/)
+  assert.match(formatRegime(regime("strong"), ""), /STRONG → BUY: results-day at 1% of capital per trade, insider-buy at 1% .*sector-leader at 1% of capital per trade\n/)
+  assert.match(formatRegime(regime("weak"), ""), /WEAK → NO NEW SWING BUYS/)
+  assert.match(formatRegime(regime("neutral"), ""), /NEUTRAL → NO NEW SWING BUYS/)
 })

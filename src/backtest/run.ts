@@ -4,7 +4,7 @@
 import { mkdir, writeFile } from "fs/promises"
 import { join } from "path"
 import { computeStockSignal, rankRelativeStrength, assessRegime, type DailyPriceRow, type StockSignal } from "../services/market/scan.js"
-import { SWING_RULES, INTRADAY_RULES, intradayPlan, type Board, type StockDay, type StrategyName } from "../services/market/strategies.js"
+import { SWING_RULES, INTRADAY_RULES, intradayPlan, leadingSectors, liveRiskPercent, type Board, type MarketType, type StockDay, type StrategyName } from "../services/market/strategies.js"
 import { simulateTrade, type TradeResult } from "./simulate.js"
 import { loadHistory, type History, type StockHistory } from "./history.js"
 import { HISTORY_DIR, writeGz } from "./download.js"
@@ -61,15 +61,7 @@ function backtest(history: History): { trades: TradeRecord[]; state: ScanState; 
     rankRelativeStrength(today.filter((entry) => entry.stock.board === "sme").map((entry) => entry.signal))
     const regime = assessRegime(mainSignals, rowsByDay.slice(Math.max(0, day - 4), day + 1)).label
 
-    // the 2 sectors (Nifty 500) with the best average 20-session return
-    const sectorReturns = new Map<string, number[]>()
-    for (const { stock, signal } of today) {
-      const sector = history.sectorOf.get(stock.symbol)
-      if (sector) sectorReturns.set(sector, [...(sectorReturns.get(sector) ?? []), signal.changePercent20d])
-    }
-    const leadingSectors = new Set([...sectorReturns].filter(([, returns]) => returns.length >= 5)
-      .map(([sector, returns]) => [sector, returns.reduce((a, b) => a + b, 0) / returns.length] as const)
-      .sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sector]) => sector))
+    const sectorsLeading = leadingSectors(today.map(({ stock, signal }) => ({ sector: history.sectorOf.get(stock.symbol), changePercent20d: signal.changePercent20d })))
 
     const nextOpenTime = day + 1 < days.length ? closeTimes[day + 1] - 6.25 * 3_600_000 : closeTimes[day] + 17.75 * 3_600_000
     for (const { stock, barIndex, signal } of today) {
@@ -82,7 +74,7 @@ function backtest(history: History): { trades: TradeRecord[]; state: ScanState; 
         resultsFiledAfterLastClose: day > 0 && filings.some((time) => time > closeTimes[day - 1] && time <= closeTimes[day]),
         resultsFiledAfterTodaysClose: filings.some((time) => time > closeTimes[day] && time < nextOpenTime),
         insiderBuyValueToday: history.insiderBuys.get(stock.symbol)?.get(day) ?? 0,
-        inLeadingSector: leadingSectors.has(history.sectorOf.get(stock.symbol) ?? ""),
+        inLeadingSector: sectorsLeading.has(history.sectorOf.get(stock.symbol) ?? ""),
       }
       const record = (strategy: StrategyName, result: TradeResult) => {
         trades.push({ symbol: stock.symbol, board: stock.board, strategy, signalDay: days[day], signalIndex: barIndex, regime, relativeStrengthRank: signal.relativeStrengthRank, result })
@@ -353,9 +345,12 @@ async function main() {
 
   const sized = sizesFromPeriodOne(swingTrades, "sized")
   const strongOnly = sizesFromPeriodOne(swingTrades, "strong only")
-  const currentLive: SizeTable = new Map(["strong", "neutral", "weak"].map((regime) => [`stage2-tight|main|${regime}`, RISK_BY_REGIME[regime]]))
+  const before: SizeTable = new Map(["strong", "neutral", "weak"].map((regime) => [`stage2-tight|main|${regime}`, RISK_BY_REGIME[regime]]))
+  const live: SizeTable = new Map(SWING_RULES.flatMap((rule) => (["main", "sme"] as const).flatMap((board) => (["strong", "neutral", "weak"] as MarketType[])
+    .map((regime) => [`${rule.name}|${board}|${regime}`, liveRiskPercent(rule.name, board, regime)] as const))))
   const accounts = (fromDay: string, toDay = "9999") => [
-    simulateAccount("Live today: stage2-tight, main board, 1% / 0.5% / 0.25%", history, swingTrades, currentLive, fromDay, toDay),
+    simulateAccount("Before (pushed 18 Nov morning): stage2-tight, main board, 1% / 0.5% / 0.25%", history, swingTrades, before, fromDay, toDay),
+    simulateAccount("**Live now** (strategies.ts LIVE_RISK_PERCENT)", history, swingTrades, live, fromDay, toDay),
     simulateAccount("Kept rules, sized by market type", history, swingTrades, sized, fromDay, toDay),
     simulateAccount("Kept rules, strong market only", history, swingTrades, strongOnly, fromDay, toDay),
   ]

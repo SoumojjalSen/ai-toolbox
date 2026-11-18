@@ -1,10 +1,11 @@
 import { loadStockSignals, type DailyPriceRow } from "./scan.js"
 import { scorePick, buildTrackRecord, buyLimit, type ReportPick, type Finding } from "./scorecard.js"
 import { readHoldings } from "./holdings.js"
-import { fetchFilingHistory } from "./lenses.js"
+import { fetchFilingHistory, fetchRecentResultsSymbols } from "./lenses.js"
+import { updateFundamentals } from "./fundamentals.js"
 import { fetchNseJson } from "./nse.js"
 import { STRONG_QIB, type IpoCallRecord } from "./ipo.js"
-import { readJson, listJson, todayIst, nseDate } from "./store.js"
+import { readJson, listJson, todayIst, nseDate, parseNseDate } from "./store.js"
 import type { MarketEmail } from "./alert.js"
 import { convertMarkdownToEmailHtml, markdownTable, tableCell } from "../../formats.js"
 
@@ -123,7 +124,10 @@ export async function buildEveningScorecard(): Promise<MarketEmail> {
     if (index < 0) continue
     for (const pick of (await readJson<ReportPick[]>(`report-picks/${file}`)) ?? []) {
       const laterBars = sessions.slice(index).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is DailyPriceRow => !!row)
-      const outcome = scorePick({ ...pick, relativeStrengthRank: 0, lenses: [], regime: "" }, laterBars)
+      // hold to the report's sell-by date (60-session rules sell later than 30)
+      const sellByIndex = pick.sellBy ? sessionDates.indexOf(pick.sellBy) : -1
+      const holdSessions = sellByIndex >= index ? sellByIndex - index + 1 : pick.sellBy && parseNseDate(pick.sellBy) > parseNseDate(sessionDates.at(-1)!) ? Infinity : undefined
+      const outcome = scorePick({ ...pick, relativeStrengthRank: 0, lenses: [], regime: "", holdSessions }, laterBars)
       if (outcome.status === "open") open++
       else if (outcome.status === "not entered") notEntered++
       else { closed++; totalR += outcome.r; wins += outcome.status === "target" ? 1 : 0 }
@@ -138,6 +142,14 @@ export async function buildEveningScorecard(): Promise<MarketEmail> {
   // 4. holdings today
   const holdingBars = [...holdings.symbols].map((symbol) => todayBars.get(symbol)).filter((bar): bar is DailyPriceRow => !!bar)
   if (holdingBars.length) blocks.push(`## Your holdings today\n\n${holdingBars.sort((a, b) => dayChange(b) - dayChange(a)).map((bar) => `${bar.symbol} ${sign(dayChange(bar))}`).join(" · ")}`)
+
+  // 5. add the results filed in the last 3 days to the fundamentals store (tomorrow's long-term screens read it)
+  const filed = await fetchRecentResultsSymbols(3)
+  if (!filed) blocks.push("## Fundamentals\n\n⚠️ NSE announcements didn't return — new results weren't added; tomorrow's long-term screens use older figures.")
+  else {
+    const { added, failed } = await updateFundamentals(filed)
+    blocks.push(`## Fundamentals\n\n${added} new quarterly filings added from ${filed.length} companies that filed results in the last 3 days${failed.length ? ` · ⚠️ couldn't read: ${failed.join(", ")}` : ""}.`)
+  }
 
   const markdown = [`# Scorecard — ${today}`, ...blocks].join("\n\n")
   const flagged = systemCheck.length ? ` — ${systemCheck.length} to check` : ""

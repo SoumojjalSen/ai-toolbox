@@ -126,14 +126,16 @@ Strong market only: insider-buy · main · strong (1%); new-listing-breakout · 
 Period 1 (rules chosen here):
 | Setup | Trades | Skipped (risk cap) | 2023 | 2024 | 2025 | 2026 | Total | Worst drop from a peak |
 |---|---|---|---|---|---|---|---|---|
-| Live today: stage2-tight, main board, 1% / 0.5% / 0.25% | 590 | 5076 | +6.1% | +22.3% | -26.1% | +1.5% | +3.8% | −46.1% |
+| Before (pushed 18 Nov morning): stage2-tight, main board, 1% / 0.5% / 0.25% | 590 | 5076 | +6.1% | +22.3% | -26.1% | +1.5% | +3.8% | −46.1% |
+| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 143 | 3994 | -0.6% | +17.1% | +6.0% | +0.0% | +22.5% | −19.1% |
 | Kept rules, sized by market type | 543 | 4639 | +19.6% | +33.2% | -16.0% | -0.6% | +36.1% | −37.8% |
 | Kept rules, strong market only | 143 | 3994 | -0.6% | +17.1% | +6.0% | +0.0% | +22.5% | −19.1% |
 
 Period 2 only (2025-11-01 →, the check):
 | Setup | Trades | Skipped (risk cap) | 2025 | 2026 | Total | Worst drop from a peak |
 |---|---|---|---|---|---|---|
-| Live today: stage2-tight, main board, 1% / 0.5% / 0.25% | 333 | 1400 | +0.5% | -1.5% | -0.9% | −15.1% |
+| Before (pushed 18 Nov morning): stage2-tight, main board, 1% / 0.5% / 0.25% | 333 | 1400 | +0.5% | -1.5% | -0.9% | −15.1% |
+| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 48 | 851 | +0.0% | +28.5% | +28.5% | −4.4% |
 | Kept rules, sized by market type | 341 | 1441 | -5.4% | +7.0% | +1.6% | −20.6% |
 | Kept rules, strong market only | 48 | 851 | +0.0% | +28.5% | +28.5% | −4.4% |
 

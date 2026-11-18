@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { computeMetrics, SCREENS } from "../../src/backtest/screens.js"
-import type { Filing } from "../../src/backtest/fundamentals.js"
+import { computeMetrics, SCREENS } from "../../src/services/market/screens.js"
+import { parseFilingXbrl, type Filing } from "../../src/services/market/fundamentals.js"
 
 const quarterEnds = ["2024-09-30", "2024-06-30", "2024-03-31", "2023-12-31", "2023-09-30", "2023-06-30", "2023-03-31", "2022-12-31"]
 const crore = 1e7
@@ -50,4 +50,22 @@ test("screens: P/E below 30 and the Lynch fast-grower rule on the same stock", (
   assert.equal(screen("P/E below 30").passes(metrics, price), true)
   assert.equal(screen("Peter Lynch fast growers").passes(metrics, price), true) // PEG 0.6, growth 25%, P/E 15, D/E 0.25
   assert.equal(screen("P/E below 30").passes(computeMetrics(filings(), 1400)!, price), false) // P/E 35
+})
+
+test("computeMetrics: debt missing from the filing leaves ROCE and debt/equity unknown, not zero", () => {
+  const noDebt = filings().map((filing, index) => (index === 0 ? { ...filing, borrowings: undefined } : filing))
+  const metrics = computeMetrics(noDebt, 600)!
+  assert.equal(metrics.debtToEquity, undefined)
+  assert.equal(metrics.roce, undefined)
+  assert.equal(metrics.roe, 20)
+})
+
+
+test("parseFilingXbrl reads a lender's debt (borrowings + debt securities + deposits)", () => {
+  const xml = ["Borrowings:1000", "DebtSecurities:400", "Deposits:0", "Equity:500"].map((pair) => {
+    const [name, amount] = pair.split(":")
+    return `<in-bse-fin:${name} contextRef="OneI" unitRef="INR">${amount}</in-bse-fin:${name}>`
+  }).join("")
+  assert.equal(parseFilingXbrl(xml).borrowings, 1400)
+  assert.equal(parseFilingXbrl('<in-bse-fin:BorrowingsCurrent contextRef="OneI">30</in-bse-fin:BorrowingsCurrent>').borrowings, 30)
 })

@@ -88,6 +88,12 @@ function parseNseTime(text: string): Date {
   return new Date(`${day} ${month} ${year} ${time} GMT+0530`)
 }
 
+// Companies that filed results in the last `days` days. undefined = NSE didn't answer.
+export async function fetchRecentResultsSymbols(days: number, now = new Date()): Promise<string[] | undefined> {
+  const announcements = await fetchAnnouncements(new Date(now.getTime() - days * 86_400_000), now)
+  return announcements && [...new Set(announcements.filter((announcement) => classifyAnnouncement(announcement) === "results").map((announcement) => announcement.symbol))]
+}
+
 async function fetchAnnouncements(fromDate: Date, toDate: Date, symbol?: string): Promise<NseAnnouncement[] | undefined> {
   return fetchNseJson<NseAnnouncement[]>(`corporate-announcements?index=equities${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}&from_date=${formatNseDate(fromDate)}&to_date=${formatNseDate(toDate)}`)
 }

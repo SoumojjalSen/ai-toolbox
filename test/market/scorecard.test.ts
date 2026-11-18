@@ -43,4 +43,5 @@ test("recordPicks + buildTrackRecord tally results overall, per lens and per reg
   assert.match(record, /With order filing: 1 closed · 100% hit target · avg 3\.00R/)
   assert.match(record, /With no extra lens: 1 closed · 0% hit target · avg -1\.00R/)
   assert.match(record, /Picked in a strong market: 2 closed/)
+  assert.match(record, /Rule stage2-tight: 2 closed/) // picks saved before rules existed count as stage2-tight
 })

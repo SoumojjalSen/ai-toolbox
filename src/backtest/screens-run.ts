@@ -9,7 +9,7 @@ import type { PriceAdjustment } from "../services/market/adjust.js"
 import { loadHistory, parseNseTimestamp, type History, type StockHistory } from "./history.js"
 import { HISTORY_DIR, readGz } from "./download.js"
 import { forwardReturn, SIGNALS_FROM, CONFIRM_FROM } from "./run.js"
-import { computeMetrics, SCREENS, type Metrics, type PriceFacts } from "./screens.js"
+import { computeMetrics, priceFactsOf, SCREENS } from "../services/market/screens.js"
 import type { Filing } from "./fundamentals.js"
 
 const REBALANCE_SESSIONS = 21
@@ -23,13 +23,6 @@ interface Pick { day: string; symbol: string; returns: (number | undefined)[]; b
 function rawPrice(stock: StockHistory, barIndex: number, closeTime: number, factorsAfter: { exTime: number; factor: number }[] | undefined): number {
   const factor = (factorsAfter ?? []).filter((action) => action.exTime > closeTime).reduce((product, action) => product * action.factor, 1)
   return stock.bars[barIndex].close / factor
-}
-
-function priceFacts(stock: StockHistory, barIndex: number): PriceFacts | undefined {
-  if (barIndex < 126) return undefined
-  const year = stock.bars.slice(Math.max(0, barIndex - 251), barIndex + 1)
-  const close = stock.bars[barIndex].close
-  return { percentFrom52WeekHigh: (close / Math.max(...year.map((bar) => bar.high)) - 1) * 100, return6Months: (close / stock.bars[barIndex - 126].close - 1) * 100 }
 }
 
 function bigWinner(stock: StockHistory, barIndex: number, history: History): boolean | undefined {
@@ -64,7 +57,7 @@ async function main() {
       if (turnover < MIN_TURNOVER_LAKHS) continue
       const known = (filingsBySymbol.get(stock.symbol) ?? []).filter((filing) => filing.filedTime <= asOf)
       const metrics = computeMetrics(known, rawPrice(stock, barIndex, asOf, factorsAfter.get(stock.symbol)))
-      const facts = priceFacts(stock, barIndex)
+      const facts = priceFactsOf(stock.bars.slice(Math.max(0, barIndex - 251), barIndex + 1))
       if (!metrics || !facts) continue
       screened++
       const pick: Pick = { day: history.days[day], symbol: stock.symbol, returns: HOLDS.map((hold) => forwardReturn(history, stock, barIndex, hold)), bigWinner: bigWinner(stock, barIndex, history) }

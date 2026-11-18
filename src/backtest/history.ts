@@ -1,9 +1,10 @@
 import { readdir } from "fs/promises"
 import { join } from "path"
-import { parseDailyPriceFile, type DailyPriceRow } from "../services/market/scan.js"
+import { parseDailyPriceFile, parseNseTimestamp, type DailyPriceRow } from "../services/market/scan.js"
+export { parseNseTimestamp }
 import { adjustForCorporateActions, type PriceAdjustment } from "../services/market/adjust.js"
 import { parseNseDate } from "../services/market/store.js"
-import type { Board } from "../services/market/strategies.js"
+import { isInsiderMarketBuy, type Board } from "../services/market/strategies.js"
 import { HISTORY_DIR, readGz } from "./download.js"
 
 // Everything the backtest reads, from data/market-history (see download.ts), indexed by session.
@@ -27,12 +28,6 @@ export interface History {
 
 const SME_SERIES = ["SM", "ST"]
 const IST_CLOSE_MS = (15 * 60 + 30) * 60_000
-
-// "13-Nov-2025 17:36:22" / "06-Jan-2024 17:58" → epoch ms (IST)
-export function parseNseTimestamp(text: string): number {
-  const [date, time = "00:00"] = text.trim().split(" ")
-  return parseNseDate(date) + Number(time.slice(0, 2)) * 3_600_000 + Number(time.slice(3, 5)) * 60_000
-}
 
 const isoFromEpoch = (epochMs: number) => new Date(epochMs + 6 * 3_600_000).toISOString().slice(0, 10)
 
@@ -95,7 +90,7 @@ export async function loadHistory(): Promise<History> {
   const dayOf = new Map(days.map((day, index) => [day, index]))
   const insiderBuys = new Map<string, Map<number, number>>()
   for (const trade of JSON.parse(await readGz("insider-trades.json.gz")) as { symbol: string; personCategory: string; acqMode: string; type: string; secType: string; value: number; disclosed: string }[]) {
-    if (!/promoter|director|key managerial/i.test(trade.personCategory) || trade.acqMode !== "Market Purchase" || trade.type !== "Buy" || !/equity/i.test(trade.secType)) continue
+    if (!isInsiderMarketBuy(trade)) continue
     // disclosed on a non-trading day → counts on the next session
     let day = dayOf.get(isoFromEpoch(parseNseTimestamp(trade.disclosed)))
     for (let ahead = 1; day === undefined && ahead < 5; ahead++) day = dayOf.get(isoFromEpoch(parseNseTimestamp(trade.disclosed) + ahead * 86_400_000))

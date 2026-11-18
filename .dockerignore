@@ -15,3 +15,4 @@ dist
 README.md
 test
 data
+!data/market-history/fundamentals.json.gz

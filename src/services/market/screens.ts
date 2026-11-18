@@ -1,4 +1,5 @@
 import type { Filing } from "./fundamentals.js"
+import type { DailyPriceRow } from "./scan.js"
 
 // Popular Indian stock screens (Screener.in public screens, Peter Lynch, Greenblatt, CANSLIM, Coffee Can), rebuilt
 // from point-in-time NSE filings. The data starts Dec 2021, so "5-year" and "10-year" conditions become the
@@ -58,7 +59,8 @@ export function computeMetrics(filings: Filing[], rawPrice: number): Metrics | u
   const marketCap = shares * rawPrice
   const profitGrowth = growth(thisYear.profit, lastYear.profit)
   const pe = thisYear.profit > 0 ? marketCap / thisYear.profit : undefined
-  const capital = (sheet: Filing) => sheet.equity! + (sheet.borrowings ?? 0)
+  // debt unknown (not in the filing) → ROCE and debt/equity unknown, never "no debt"
+  const capital = (sheet: Filing | undefined) => (sheet && sheet.borrowings !== undefined ? sheet.equity! + sheet.borrowings : undefined)
   return {
     marketCapCrore: marketCap / 1e7,
     pe,
@@ -68,9 +70,9 @@ export function computeMetrics(filings: Filing[], rawPrice: number): Metrics | u
     salesGrowthYearBefore: yearBefore ? growth(lastYear.revenue, yearBefore.revenue) : undefined,
     latestQuarterProfitGrowth: slots[4] ? growth(latest.profit!, slots[4].profit!) : undefined,
     roe: latestBalance ? (thisYear.profit / latestBalance.equity!) * 100 : undefined,
-    roce: latestBalance ? (thisYear.ebit / capital(latestBalance)) * 100 : undefined,
-    roceYearBefore: yearEarlierBalance ? (lastYear.ebit / capital(yearEarlierBalance)) * 100 : undefined,
-    debtToEquity: latestBalance ? (latestBalance.borrowings ?? 0) / latestBalance.equity! : undefined,
+    roce: capital(latestBalance) ? (thisYear.ebit / capital(latestBalance)!) * 100 : undefined,
+    roceYearBefore: capital(yearEarlierBalance) ? (lastYear.ebit / capital(yearEarlierBalance)!) * 100 : undefined,
+    debtToEquity: latestBalance && latestBalance.borrowings !== undefined ? latestBalance.borrowings / latestBalance.equity! : undefined,
     earningsYield: (thisYear.ebit / (marketCap + (latestBalance?.borrowings ?? 0))) * 100,
   }
 }
@@ -137,3 +139,30 @@ export const SCREENS: Screen[] = [
     passes: (m, price) => m.marketCapCrore > 100 && above(m.latestQuarterProfitGrowth, 20) && above(m.profitGrowth, 20) && price.percentFrom52WeekHigh >= -15 && price.return6Months >= 20,
   },
 ]
+
+// 52-week high and 6-month return from adjusted daily bars ending today; undefined under 127 sessions
+export function priceFactsOf(bars: DailyPriceRow[]): PriceFacts | undefined {
+  if (bars.length < 127) return undefined
+  const close = bars[bars.length - 1].close
+  const year = bars.slice(-252)
+  return { percentFrom52WeekHigh: (close / Math.max(...year.map((bar) => bar.high)) - 1) * 100, return6Months: (close / bars[bars.length - 127].close - 1) * 100 }
+}
+
+// The screens shown in the morning report: the two that beat all screened stocks in both backtest periods
+// (data/market-history/backtest/screens-report.md: compounders +7.4% vs +2.1% over 6 months in Nov 2023 → Oct 2025,
+// +18.0% vs +11.2% in the last year; CANSLIM +5.1% and +15.1%). The others didn't hold up and aren't shown.
+export const LIVE_SCREEN_NAMES = ["Clean-balance-sheet compounders (Screener)", "CANSLIM (C + A + new high)"]
+
+export interface LongTermPick { symbol: string; screens: string[]; metrics: Metrics; price: PriceFacts }
+
+// stocks: liquid main-board stocks with their filings already public and today's traded price
+export function longTermPicks(stocks: { symbol: string; filings: Filing[]; rawPrice: number; bars: DailyPriceRow[] }[]): LongTermPick[] {
+  const screens = SCREENS.filter((screen) => LIVE_SCREEN_NAMES.includes(screen.name))
+  return stocks.flatMap(({ symbol, filings, rawPrice, bars }) => {
+    const metrics = computeMetrics(filings, rawPrice)
+    const price = priceFactsOf(bars)
+    if (!metrics || !price) return []
+    const passed = screens.filter((screen) => screen.passes(metrics, price)).map((screen) => screen.name)
+    return passed.length ? [{ symbol, screens: passed, metrics, price }] : []
+  }).sort((a, b) => b.screens.length - a.screens.length || b.metrics.marketCapCrore - a.metrics.marketCapCrore)
+}

@@ -6,13 +6,19 @@ import { fetchMarketLenses, fetchFilingHistory, fetchResultsLine, type EventKind
 import { readJson, writeJson, todayIst, nseDate, parseNseDate, listJson, readText, writeText, listFiles, deleteFile } from "./store.js"
 import { recordPicks, buildTrackRecord, findOpenTrades, tradeStatus } from "./scorecard.js"
 import { fetchPriceAdjustments, adjustForCorporateActions } from "./adjust.js"
+import { SWING_RULES, LIVE_RISK_PERCENT, leadingSectors, liveRiskPercent, type MarketType, type StockDay, type StrategyName } from "./strategies.js"
+import { fetchRuleInputs } from "./rule-inputs.js"
+import { loadFundamentals } from "./fundamentals.js"
+import { longTermPicks, LIVE_SCREEN_NAMES } from "./screens.js"
 
 // Scans every NSE EQ stock in code — Claude's WebFetch summarises pages with a small model, so it can't
 // reliably read a 400 KB file of ~2,600 stocks. The result is a compact text block for the market-analyst prompt.
 
-// ~10 months: 200-day average plus 20 sessions to tell whether it's rising (Minervini trend template)
-const HISTORY_SESSIONS = 220
-const MAX_CALENDAR_DAYS_BACK = 340 // weekends and holidays in between
+// Signals read ~10 months (200-day average plus 20 sessions to tell whether it's rising — the backtest's window);
+// a year is loaded for the long-term screens' 52-week high
+const SIGNAL_SESSIONS = 220
+const HISTORY_SESSIONS = 253
+const MAX_CALENDAR_DAYS_BACK = 390 // weekends and holidays in between
 // ₹50 lakh average daily turnover — below that a pick may be impossible to buy/sell at the quoted price
 const MIN_AVERAGE_TURNOVER_LAKHS = 50
 
@@ -183,14 +189,9 @@ export function rankRelativeStrength(stockSignals: StockSignal[]): void {
   ranked.forEach((s, index) => { s.relativeStrengthRank = Math.max(1, Math.min(99, Math.round(((index + 1) / ranked.length) * 100))) })
 }
 
-// Swing setups: Stage 2 + tight 10-day range, strongest RS first, stop 2 × the average daily range (ATR14), target 3R,
-// hold ≤ 30 sessions. Backtest on NSE daily price files (Jul 2023 → Oct 2026, signals from May 2024, entry at the next
-// open, 0.25% round-trip cost, top 10 a day): −0.05R a trade overall — the rule only made money in a STRONG market
-// (+0.04R, or +0.15R leaving out stocks with a split/bonus nearby); neutral −0.10R, weak −0.08R. That test's code
-// wasn't kept and it used prices not adjusted for splits/bonuses, so it can't be reproduced — the regime sizes the
-// buys instead of blocking them (see RISK_BY_REGIME) until a new backtest sets the sizes. An earlier one-year test
-// (Oct 2025 → Oct 2026) showed +0.24R; it didn't hold over three years. 20-day breakouts, episodic pivots, loser bounces and intraday setups all lost money after
-// costs — they stay as context lists, never as picks.
+// Swing setups: the pick rules live in strategies.ts and the backtest (src/backtest/run.ts) replays them on 3 years
+// of adjusted NSE prices; what's traded in which market type is strategies.ts LIVE_RISK_PERCENT. Default levels:
+// stop 2 × the average daily range (ATR14), target 3R. Leaders (Stage 2 + RS ≥ 80) are watched, never bought.
 const SWING_STOP_ATR = 2
 const REWARD_TO_RISK = 3
 export const SWING_HOLD_SESSIONS = 30
@@ -198,7 +199,12 @@ const LEADER_MIN_RELATIVE_STRENGTH = 80
 
 export interface TradeSetup {
   symbol: string
-  kind: "core" | "leader" // core = Stage 2 + tight (the backtested rule); leader = Stage 2 + RS ≥ 80, waiting to tighten
+  // buy = a pick rule fired and it's traded in today's market type; watch = a rule fired but isn't traded today, or a
+  // Stage 2 leader (RS ≥ 80) that no rule has picked yet
+  kind: "buy" | "watch"
+  strategy: StrategyName | "leader"
+  riskPercent: number // % of capital to risk (strategies.ts LIVE_RISK_PERCENT); 0 for watch
+  holdSessions: number // sell by the close of this session after buying
   relativeStrengthRank: number
   close: number
   entry: number
@@ -211,29 +217,71 @@ function roundPrice(price: number): number {
   return Math.round(price * 20) / 20 // NSE tick size ₹0.05
 }
 
-export function buildSwingSetup(s: StockSignal): TradeSetup | undefined {
-  const isCore = s.isStage2Uptrend && s.isTightRange
+// The first rule (strategies.ts order) that fires and is traded in today's market type makes it a buy; a rule
+// that fires but isn't traded today, or a leader, goes on the watchlist
+export function buildSwingSetup(day: StockDay, marketType: MarketType): TradeSetup | undefined {
+  const s = day.signal
+  if (s.averageDailyRange <= 0) return undefined
+  const fired = SWING_RULES.filter((rule) => rule.fires(day))
+  const traded = fired.find((rule) => liveRiskPercent(rule.name, day.board, marketType) > 0)
+  const rule = traded ?? fired[0]
   const isLeader = s.isStage2Uptrend && s.relativeStrengthRank >= LEADER_MIN_RELATIVE_STRENGTH
-  if ((!isCore && !isLeader) || s.averageDailyRange <= 0) return undefined
+  if (!rule && !isLeader) return undefined
+  const plan = rule ? rule.plan(day) : { risk: SWING_STOP_ATR * s.averageDailyRange, reward: REWARD_TO_RISK, holdSessions: SWING_HOLD_SESSIONS }
   const entry = roundPrice(s.close)
-  const risk = SWING_STOP_ATR * s.averageDailyRange
   return {
-    symbol: s.symbol, kind: isCore ? "core" : "leader", relativeStrengthRank: s.relativeStrengthRank, close: s.close, entry,
-    stopLoss: roundPrice(entry - risk), target: roundPrice(entry + REWARD_TO_RISK * risk),
+    symbol: s.symbol, kind: traded ? "buy" : "watch", strategy: rule?.name ?? "leader",
+    riskPercent: traded ? liveRiskPercent(traded.name, day.board, marketType) : 0, holdSessions: plan.holdSessions,
+    relativeStrengthRank: s.relativeStrengthRank, close: s.close, entry,
+    stopLoss: roundPrice(entry - plan.risk), target: roundPrice(entry + plan.reward * plan.risk),
     reasons: [
-      `RS ${s.relativeStrengthRank}`, "stage 2", ...(s.isTightRange ? ["tight 10-day range"] : []),
+      ...fired.map((firedRule) => firedRule.name),
+      `RS ${s.relativeStrengthRank}`, ...(s.isStage2Uptrend ? ["stage 2"] : []), ...(s.isTightRange ? ["tight 10-day range"] : []),
       `3m ${s.changePercent3m > 0 ? "+" : ""}${s.changePercent3m.toFixed(0)}%`, `${s.percentFromHigh.toFixed(0)}% from high`,
       ...(s.volumeRatio >= 2 ? [`vol ${s.volumeRatio.toFixed(1)}×`] : []),
     ],
   }
 }
 
-// Core setups first, each group strongest RS first
-export function rankSwingSetups(stockSignals: StockSignal[]): TradeSetup[] {
-  return stockSignals
-    .map(buildSwingSetup)
+// Buys first, each group strongest RS first
+export function rankSwingSetups(days: StockDay[], marketType: MarketType): TradeSetup[] {
+  return days
+    .map((day) => buildSwingSetup(day, marketType))
     .filter((setup): setup is TradeSetup => !!setup)
-    .sort((a, b) => (a.kind === b.kind ? b.relativeStrengthRank - a.relativeStrengthRank : a.kind === "core" ? -1 : 1))
+    .sort((a, b) => (a.kind === b.kind ? b.relativeStrengthRank - a.relativeStrengthRank : a.kind === "buy" ? -1 : 1))
+}
+
+// Today's inputs for the pick rules, one per scanned stock — the live twin of the backtest's day loop (run.ts)
+export function buildStockDays(sessions: DailyPriceRow[][], sessionDates: string[], stockSignals: StockSignal[], inputs: {
+  listedOn: Map<string, number>; sectorOf: Map<string, string>; insiderBuyValue: (symbol: string, sessionDate: string) => number; resultsFiledAt: Map<string, string>
+}): StockDay[] {
+  const historyBySymbol = new Map<string, DailyPriceRow[]>()
+  for (const session of sessions) for (const row of session) historyBySymbol.set(row.symbol, [...(historyBySymbol.get(row.symbol) ?? []), row])
+  const close = (sessionDate: string) => parseNseDate(sessionDate) + (15 * 60 + 30) * 60_000
+  const lastClose = close(sessionDates[sessionDates.length - 1])
+  const previousClose = sessionDates.length > 1 ? close(sessionDates[sessionDates.length - 2]) : -Infinity
+  const historyStart = parseNseDate(sessionDates[0])
+  const sectors = leadingSectors(stockSignals.map((signal) => ({ sector: inputs.sectorOf.get(signal.symbol), changePercent20d: signal.changePercent20d })))
+  return stockSignals.map((signal) => {
+    const bars = historyBySymbol.get(signal.symbol) ?? []
+    const listed = inputs.listedOn.get(signal.symbol)
+    const filed = inputs.resultsFiledAt.get(signal.symbol)
+    const filedTime = filed ? parseNseTimestamp(filed) : undefined
+    return {
+      bars, signal, board: "main",
+      sessionsSinceListing: listed !== undefined && listed > historyStart ? bars.length : undefined,
+      resultsFiledAfterLastClose: filedTime !== undefined && filedTime > previousClose && filedTime <= lastClose,
+      resultsFiledAfterTodaysClose: filedTime !== undefined && filedTime > lastClose,
+      insiderBuyValueToday: inputs.insiderBuyValue(signal.symbol, sessionDates[sessionDates.length - 1]),
+      inLeadingSector: sectors.has(inputs.sectorOf.get(signal.symbol) ?? ""),
+    }
+  })
+}
+
+// "13-Nov-2025 17:36:22" → epoch ms (IST)
+export function parseNseTimestamp(text: string): number {
+  const [date, time = "00:00"] = text.trim().split(" ")
+  return parseNseDate(date) + Number(time.slice(0, 2)) * 3_600_000 + Number(time.slice(3, 5)) * 60_000
 }
 
 // Market regime from breadth (O'Neil's "M", Stockbee's 4% counts) — sets how much to risk per buy (see above).
@@ -267,17 +315,16 @@ export function assessRegime(stockSignals: StockSignal[], sessions: DailyPriceRo
   return { label, percentAbove50, percentAbove200, upMoves5d, downMoves5d }
 }
 
-// No cap on the number of picks in any regime — every setup that passes all checks is a pick, sized by the regime.
-// Interim sizes until the planned backtest replaces them; outside a strong market picks are low confidence.
-const RISK_BY_REGIME: Record<Regime["label"], string> = {
-  strong: "BUY: risk 1% of capital per trade",
-  neutral: "BUY at half size: risk 0.5% of capital per trade — low confidence (rule not re-tested in a neutral market)",
-  weak: "BUY at quarter size: risk 0.25% of capital per trade — low confidence (rule not re-tested in a weak market)",
+// What today's market type allows, from the live size table (strategies.ts) — one place decides it
+function buyingToday(label: Regime["label"]): string {
+  const traded = Object.keys(LIVE_RISK_PERCENT).filter((rule) => LIVE_RISK_PERCENT[rule][label] > 0)
+  if (!traded.length) return "NO NEW SWING BUYS — every rule lost money in this market type in the backtest's check period; setups go on the watchlist (long-term screens still apply)"
+  return `BUY: ${traded.map((rule) => `${rule} at ${LIVE_RISK_PERCENT[rule][label]}% of capital per trade`).join(", ")}${traded.length < Object.keys(LIVE_RISK_PERCENT).length ? " — the other rules aren't traded in this market type (watchlist)" : ""}`
 }
 
 export function formatRegime(regime: Regime, vixLine: string): string {
   return [
-    `### Market regime (code): ${regime.label.toUpperCase()} → ${RISK_BY_REGIME[regime.label]}`,
+    `### Market regime (code): ${regime.label.toUpperCase()} → ${buyingToday(regime.label)}`,
     `${regime.percentAbove50.toFixed(0)}% of liquid stocks above their 50-day average, ${regime.percentAbove200.toFixed(0)}% above the 200-day; last 5 sessions: ${regime.upMoves5d} moves of +4% or more vs ${regime.downMoves5d} of −4% or more${vixLine}`,
     "Rule: strong = ≥60% above the 50-day AND 4% up-moves ≥1.5× down-moves; weak = <40% above the 50-day or up/down <0.7 (with no strong sign).",
   ].join("\n")
@@ -435,7 +482,7 @@ async function fetchMarketContext(etfSymbols: Set<string>): Promise<{ text: stri
 const POSITIVE_EVENTS = new Set<EventKind>(["order", "corporate action", "expansion"])
 const INFO_EVENTS = new Set<EventKind>(["results", "rating change", "fund raise", "press release", "price-move query"])
 const NEGATIVE_EVENTS = new Set<EventKind>(["regulatory", "management exit"])
-const SETUP_LIMITS = { core: 40, leader: 20 }
+const SETUP_LIMITS = { buy: 40, watch: 20 }
 const PICKS_TO_RECORD = 10
 const MAX_EVENTS = 60
 
@@ -472,7 +519,7 @@ function rankWithLenses(setups: TradeSetup[], signalsBySymbol: Map<string, Stock
   const lensScore = (setup: RankedSetup) => setup.positive.length - setup.warnings.length
   return setups
     .map((setup) => ({ ...setup, ...lensesFor(setup.symbol, signalsBySymbol.get(setup.symbol), lenses) }))
-    .sort((a, b) => (a.kind !== b.kind ? (a.kind === "core" ? -1 : 1) : lensScore(b) - lensScore(a) || b.relativeStrengthRank - a.relativeStrengthRank))
+    .sort((a, b) => (a.kind !== b.kind ? (a.kind === "buy" ? -1 : 1) : lensScore(b) - lensScore(a) || b.relativeStrengthRank - a.relativeStrengthRank))
 }
 
 function formatSwingSetups(ranked: RankedSetup[]): string {
@@ -481,19 +528,19 @@ function formatSwingSetups(ranked: RankedSetup[]): string {
     return {
       total: ofKind.length,
       lines: ofKind.slice(0, SETUP_LIMITS[kind]).map((setup) =>
-        [setup.symbol, setup.relativeStrengthRank, setup.close.toFixed(2), setup.entry.toFixed(2), setup.stopLoss.toFixed(2), setup.target.toFixed(2), setup.reasons.join(", "), [...setup.positive, ...setup.info, ...setup.warnings].join("; ") || "—"].join(" | "),
+        [setup.symbol, setup.strategy, setup.kind === "buy" ? `${setup.riskPercent}%` : "—", setup.relativeStrengthRank, setup.close.toFixed(2), setup.entry.toFixed(2), setup.stopLoss.toFixed(2), setup.target.toFixed(2), `~${setup.holdSessions} sessions`, setup.reasons.join(", "), [...setup.positive, ...setup.info, ...setup.warnings].join("; ") || "—"].join(" | "),
       ),
     }
   }
-  const header = "symbol | RS | close ₹ | entry ₹ | stop loss ₹ | target ₹ | trend | other lenses"
-  const core = rows("core")
-  const leaders = rows("leader")
+  const header = "symbol | rule | risk % of capital | RS | close ₹ | entry ₹ | stop loss ₹ | target ₹ | sell by | rules fired, trend | other lenses"
+  const buys = rows("buy")
+  const watch = rows("watch")
   return [
-    `### Swing setups — CORE (Stage 2 + tight range; sized by the market regime; stop 2×ATR, target 3R, sell by ~${SWING_HOLD_SESSIONS} sessions) — ${core.total} qualified, top ${core.lines.length}`,
-    "Skip a setup if it trades more than 1% above entry at buy time (don't chase).",
-    header, ...core.lines,
-    `### Swing WATCHLIST — leaders (Stage 2 + RS ≥ ${LEADER_MIN_RELATIVE_STRENGTH}, not tight yet — watch, not a buy) — ${leaders.total} qualified, top ${leaders.lines.length}`,
-    header, ...leaders.lines,
+    `### Swing BUYS — a backtested rule fired and is traded in today's market (strategies.ts) — ${buys.total} qualified, top ${buys.lines.length}`,
+    "Stop = 2× the average daily range below entry, target 3R. Skip a setup if it opens more than 1% above entry (don't chase).",
+    header, ...buys.lines,
+    `### Swing WATCHLIST — a rule fired but isn't traded in today's market, or a Stage 2 leader (RS ≥ ${LEADER_MIN_RELATIVE_STRENGTH}) — not a buy today — ${watch.total} qualified, top ${watch.lines.length}`,
+    header, ...watch.lines,
   ].join("\n")
 }
 
@@ -595,6 +642,33 @@ async function formatOpenTrades(holdingSymbols: Set<string>, signalsBySymbol: Ma
   return lines.length ? ["### Your open trades from earlier report picks (code)", ...lines].join("\n") : ""
 }
 
+// Long-term screens on NSE's structured results filings (screens.ts) — every stock that passes, both screens first
+async function formatLongTermScreens(stockSignals: StockSignal[], yearOfSessions: DailyPriceRow[][]): Promise<string> {
+  const fundamentals = await loadFundamentals().catch((error: Error) => { console.error(`[market] fundamentals unavailable: ${error.message}`); return undefined })
+  if (!fundamentals) return "### ⚠️ Long-term screens unavailable today (fundamentals file couldn't be read) — say so in the report"
+  const barsBySymbol = new Map<string, DailyPriceRow[]>()
+  for (const session of yearOfSessions) for (const row of session) barsBySymbol.set(row.symbol, [...(barsBySymbol.get(row.symbol) ?? []), row])
+  const now = Date.now()
+  const picks = longTermPicks(stockSignals.map((signal) => ({
+    symbol: signal.symbol,
+    filings: (fundamentals.get(signal.symbol) ?? []).filter((filing) => parseNseTimestamp(filing.filedAt) <= now),
+    rawPrice: signal.close, // today's close: no later split to undo
+    bars: barsBySymbol.get(signal.symbol) ?? [],
+  })))
+  const percent = (value: number | undefined) => (value === undefined ? "—" : `${value >= 0 ? "+" : ""}${value.toFixed(0)}%`)
+  const counts = LIVE_SCREEN_NAMES.map((name) => `${name}: ${picks.filter((pick) => pick.screens.includes(name)).length}`).join(" · ")
+  return [
+    `### Long-term screens (code, NSE results filings; hold 6–12 months) — ${counts}`,
+    "Backtest (Nov 2023 → Nov 2026, monthly, vs all screened stocks): compounders +7.4% vs +2.1% over 6 months, then +18.0% vs +11.2% in the last year; CANSLIM +5.1% and +15.1%. Averages — many single picks fell.",
+    "symbol | screens | market cap ₹ cr | P/E | sales growth (year) | profit growth (year) | latest quarter profit growth | ROCE | ROE | debt/equity | from 52-week high | 6-month return",
+    ...picks.map(({ symbol, screens, metrics, price }) => [
+      symbol, screens.map((name) => (name.startsWith("CANSLIM") ? "CANSLIM" : "compounder")).join(" + "), metrics.marketCapCrore.toFixed(0),
+      metrics.pe?.toFixed(0) ?? "—", percent(metrics.salesGrowth), percent(metrics.profitGrowth), percent(metrics.latestQuarterProfitGrowth),
+      metrics.roce?.toFixed(0) ?? "—", metrics.roe?.toFixed(0) ?? "—", metrics.debtToEquity?.toFixed(2) ?? "—", percent(price.percentFrom52WeekHigh), percent(price.return6Months),
+    ].join(" | ")),
+  ].join("\n")
+}
+
 // Daily price history (NSE bhavcopy) minus ETFs, with signals — shared by the morning scan, the market check and the scorecard (cached after the first call)
 export async function loadStockSignals() {
   const etfSymbols = await fetchEtfSymbols()
@@ -603,29 +677,32 @@ export async function loadStockSignals() {
   if (!adjustments) console.error("[market] NSE corporate actions unavailable — prices not adjusted for splits/bonuses")
   const sessions = adjustForCorporateActions(rawSessions, sessionDates, adjustments ?? [])
     .map((session) => session.filter((row) => !etfSymbols.has(row.symbol)))
-  return { etfSymbols, sessionDates, sessions, stockSignals: computeStockSignals(sessions), pricesAdjusted: !!adjustments }
+  const signalSessions = sessions.slice(-SIGNAL_SESSIONS)
+  return { etfSymbols, sessionDates: sessionDates.slice(-SIGNAL_SESSIONS), sessions: signalSessions, yearOfSessions: sessions, stockSignals: computeStockSignals(signalSessions), pricesAdjusted: !!adjustments }
 }
 
 export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): Promise<string> {
-  const [{ etfSymbols, sessionDates, sessions, stockSignals, pricesAdjusted }, lenses, ipoBrief] = await Promise.all([loadStockSignals(), fetchMarketLenses(), buildIpoBrief(holdingSymbols)])
+  const [{ etfSymbols, sessionDates, sessions, yearOfSessions, stockSignals, pricesAdjusted }, lenses, ipoBrief] = await Promise.all([loadStockSignals(), fetchMarketLenses(), buildIpoBrief(holdingSymbols)])
   const marketContext = await fetchMarketContext(etfSymbols)
   const signalsBySymbol = new Map(stockSignals.map((stock) => [stock.symbol, stock]))
   const excluded = new Map<string, string>()
-  const setups = rankSwingSetups(stockSignals).filter((setup) => {
+  const ruleInputs = await fetchRuleInputs()
+  const regime = assessRegime(stockSignals, sessions)
+  const stockDays = buildStockDays(sessions, sessionDates, stockSignals, { ...ruleInputs, resultsFiledAt: lenses.resultsLastWeek })
+  const setups = rankSwingSetups(stockDays, regime.label).filter((setup) => {
     const veto = lenses.vetoes.get(setup.symbol)
     if (veto) excluded.set(setup.symbol, veto)
     return !veto
   })
   const latestDate = sessionDates[sessionDates.length - 1]
-  const regime = assessRegime(stockSignals, sessions)
   const ranked = rankWithLenses(setups, signalsBySymbol, lenses)
   // the top core setups without warnings are what the report can pick from — recorded for the scorecard
-  const recordable = ranked.filter((setup) => setup.kind === "core" && !setup.warnings.length).slice(0, PICKS_TO_RECORD)
-  const candidates = [...new Set([...ranked.filter((setup) => setup.kind === "core" && !setup.warnings.length).slice(0, FILING_HISTORY_CANDIDATES).map((setup) => setup.symbol), ...holdingSymbols])]
+  const recordable = ranked.filter((setup) => setup.kind === "buy" && !setup.warnings.length).slice(0, PICKS_TO_RECORD)
+  const candidates = [...new Set([...ranked.filter((setup) => setup.kind === "buy" && !setup.warnings.length).slice(0, FILING_HISTORY_CANDIDATES).map((setup) => setup.symbol), ...holdingSymbols])]
   const newsCheckEvidence = await formatNewsCheckEvidence(candidates)
   await writeJson(`data-gaps/${todayIst()}.json`, lenses.unavailable) // read by the evening scorecard
   await recordPicks(latestDate, recordable.map((setup) => ({
-    symbol: setup.symbol, entry: setup.entry, stopLoss: setup.stopLoss, target: setup.target, relativeStrengthRank: setup.relativeStrengthRank, lenses: setup.keys, regime: regime.label,
+    symbol: setup.symbol, entry: setup.entry, stopLoss: setup.stopLoss, target: setup.target, relativeStrengthRank: setup.relativeStrengthRank, lenses: setup.keys, regime: regime.label, strategy: setup.strategy, holdSessions: setup.holdSessions,
   })))
   return [
     `## Market scan — computed in code from NSE data`,
@@ -633,9 +710,10 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
     formatRegime(regime, marketContext.vixLine),
     await buildTrackRecord(sessionDates, sessions),
     marketContext.text,
-    lenses.unavailable.length ? `### ⚠️ NSE didn't return today: ${lenses.unavailable.join(", ")} — every check that depends on these is NOT VERIFIED (never treat it as "none")` : "",
+    [...lenses.unavailable, ...ruleInputs.unavailable].length ? `### ⚠️ NSE didn't return today: ${[...lenses.unavailable, ...ruleInputs.unavailable].join(", ")} — every check that depends on these is NOT VERIFIED (never treat it as "none")` : "",
     pricesAdjusted ? "" : "### ⚠️ NSE corporate actions didn't return — prices are NOT adjusted for splits/bonuses today; a stock with one in the last ~10 months can show a fake crash (wrong trend, RS and loser lists)",
     formatSwingSetups(ranked),
+    await formatLongTermScreens(stockSignals, yearOfSessions),
     newsCheckEvidence,
     formatHoldingsCheck(holdingSymbols, signalsBySymbol, lenses),
     await formatOpenTrades(holdingSymbols, signalsBySymbol),

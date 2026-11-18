@@ -20,5 +20,7 @@ COPY --from=build /app/dist ./dist
 # tsc only compiles .ts → .js. config/ and .claude/skills/ are runtime data, not in dist/.
 COPY config ./config
 COPY .claude ./.claude
+# results figures for the long-term screens (seed; the evening job adds newer filings on the data volume)
+COPY data/market-history/fundamentals.json.gz ./data/market-history/fundamentals.json.gz
 EXPOSE 8080
 CMD ["node", "dist/index.js"]

@@ -15,6 +15,8 @@ export interface RecordedPick {
   relativeStrengthRank: number
   lenses: string[] // extra lenses that agreed, e.g. "order filing"
   regime: string
+  strategy?: string // the pick rule (strategies.ts); missing on picks saved before rules existed
+  holdSessions?: number // sell-by; missing = 30
 }
 
 export interface PickOutcome {
@@ -37,12 +39,13 @@ export function scorePick(pick: RecordedPick, laterBars: DailyPriceRow[]): PickO
   if (entry > buyLimit(pick)) return { status: "not entered", r: 0 } // the report says don't chase
   const stop = entry - risk
   const target = entry + rewardMultiple * risk
-  for (const bar of laterBars.slice(0, MAX_HOLD_SESSIONS)) {
+  const holdSessions = pick.holdSessions ?? MAX_HOLD_SESSIONS
+  for (const bar of laterBars.slice(0, holdSessions)) {
     if (bar.low <= stop) return { status: "stop", r: -1 }
     if (bar.high >= target) return { status: "target", r: rewardMultiple }
   }
-  if (laterBars.length < MAX_HOLD_SESSIONS) return { status: "open", r: 0 }
-  return { status: "expired", r: (laterBars[MAX_HOLD_SESSIONS - 1].close - entry) / risk }
+  if (laterBars.length < holdSessions) return { status: "open", r: 0 }
+  return { status: "expired", r: (laterBars[holdSessions - 1].close - entry) / risk }
 }
 
 // A setup that stays top-ranked for days is one trade, not one per day — only new symbols are recorded
@@ -72,6 +75,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: DailyPr
   const overall: Tally = { closed: 0, wins: 0, totalR: 0 }
   const byLens = new Map<string, Tally>()
   const byRegime = new Map<string, Tally>()
+  const byRule = new Map<string, Tally>()
   let open = 0
   let skipped = 0
   for (const file of files) {
@@ -81,7 +85,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: DailyPr
     const picks = (await readJson<RecordedPick[]>(`picks/${file}`)) ?? []
     for (const pick of picks) {
       const firstIndex = counted.get(pick.symbol)
-      if (firstIndex !== undefined && index - firstIndex < MAX_HOLD_SESSIONS) continue
+      if (firstIndex !== undefined && index - firstIndex < (pick.holdSessions ?? MAX_HOLD_SESSIONS)) continue
       counted.set(pick.symbol, index)
       const laterBars = sessions.slice(index + 1).map((session) => session.find((row) => row.symbol === pick.symbol)).filter((row): row is DailyPriceRow => !!row)
       const outcome = scorePick(pick, laterBars)
@@ -89,7 +93,7 @@ export async function buildTrackRecord(sessionDates: string[], sessions: DailyPr
       if (outcome.status === "not entered") { skipped++; continue }
       const tallyFor = (groups: Map<string, Tally>, key: string) => groups.get(key) ?? groups.set(key, { closed: 0, wins: 0, totalR: 0 }).get(key)!
       const lensNames = pick.lenses.length ? pick.lenses : ["no extra lens"]
-      const tallies = [overall, ...lensNames.map((lens) => tallyFor(byLens, lens)), tallyFor(byRegime, pick.regime)]
+      const tallies = [overall, ...lensNames.map((lens) => tallyFor(byLens, lens)), tallyFor(byRegime, pick.regime), tallyFor(byRule, pick.strategy ?? "stage2-tight")]
       for (const tally of tallies) {
         tally.closed++
         tally.totalR += outcome.r
@@ -99,8 +103,9 @@ export async function buildTrackRecord(sessionDates: string[], sessions: DailyPr
   }
   if (!overall.closed && !open && !skipped) return ""
   return [
-    `### Track record of this system's top core setups (live, last ~${TRACK_RECORD_SESSIONS} sessions; R = multiples of the risk taken)`,
+    `### Track record of this system's top swing buys (live, last ~${TRACK_RECORD_SESSIONS} sessions; R = multiples of the risk taken)`,
     describe("All", overall) + ` · ${open} still open · ${skipped} skipped (opened above the buy limit)`,
+    ...[...byRule].map(([rule, tally]) => describe(`Rule ${rule}`, tally)),
     ...[...byLens].map(([lens, tally]) => describe(`With ${lens}`, tally)),
     ...[...byRegime].map(([regime, tally]) => describe(`Picked in a ${regime} market`, tally)),
   ].join("\n")

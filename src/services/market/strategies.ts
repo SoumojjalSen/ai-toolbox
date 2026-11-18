@@ -97,6 +97,40 @@ export const INTRADAY_RULES: { name: StrategyName; fires: (day: StockDay) => boo
   { name: "intraday-stage2", fires: (day) => day.signal.isStage2Uptrend && day.signal.isTightRange },
 ]
 
+// % of capital risked per trade, by rule and market type — the one place the live scan and the backtest's
+// "live setup" read. From the backtest (data/market-history/backtest/report.md, Nov 2023 → Nov 2026): in a strong
+// market every main-board rule made money in both periods (last year: stage2-tight +0.41R, sector-leader +0.32R,
+// new-listing-breakout +0.27R, leader-pullback +0.18R, results-day +0.13R); in neutral and weak markets they lost
+// in the check period. Insider buys in a weak market looked good per trade (+0.24R, then +0.35R) but lost as one
+// account (−4.0% last year, worst drop −21%: repeat signals on the same stocks can't all be taken), so they aren't
+// traded either. One account, this table: +22.5% (Nov 2023 → Oct 2025), +28.5% last year, worst drop −19%.
+// SME rules didn't pass and aren't traded. Intraday rules lost in every test and aren't traded.
+export type MarketType = "strong" | "neutral" | "weak"
+export const LIVE_RISK_PERCENT: Record<string, Record<MarketType, number>> = {
+  "results-day": { strong: 1, neutral: 0, weak: 0 },
+  "insider-buy": { strong: 1, neutral: 0, weak: 0 },
+  "new-listing-breakout": { strong: 1, neutral: 0, weak: 0 },
+  "stage2-tight": { strong: 1, neutral: 0, weak: 0 },
+  "leader-pullback": { strong: 1, neutral: 0, weak: 0 },
+  "sector-leader": { strong: 1, neutral: 0, weak: 0 },
+}
+export const liveRiskPercent = (strategy: StrategyName, board: Board, marketType: MarketType) =>
+  board === "main" ? LIVE_RISK_PERCENT[strategy]?.[marketType] ?? 0 : 0
+
+// An insider-buy disclosure the rule counts: a promoter, director or key manager buying equity in the market
+export function isInsiderMarketBuy(trade: { personCategory: string; acqMode: string; type: string; secType: string }): boolean {
+  return /promoter|director|key managerial/i.test(trade.personCategory) && trade.acqMode === "Market Purchase" && trade.type === "Buy" && /equity/i.test(trade.secType)
+}
+
+// The 2 Nifty 500 sectors with the best average 20-session return (sectors with at least 5 stocks scanned)
+export function leadingSectors(stocks: { sector: string | undefined; changePercent20d: number }[]): Set<string> {
+  const returns = new Map<string, number[]>()
+  for (const { sector, changePercent20d } of stocks) if (sector) returns.set(sector, [...(returns.get(sector) ?? []), changePercent20d])
+  return new Set([...returns].filter(([, values]) => values.length >= 5)
+    .map(([sector, values]) => [sector, values.reduce((a, b) => a + b, 0) / values.length] as const)
+    .sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sector]) => sector))
+}
+
 export function intradayPlan(strategy: StrategyName, day: StockDay): TradePlan {
   return { strategy, risk: INTRADAY_STOP_ATR * day.signal.averageDailyRange, reward: Infinity, holdSessions: 0 }
 }
