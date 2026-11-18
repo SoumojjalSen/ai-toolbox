@@ -108,10 +108,10 @@ function backtest(history: History): { trades: TradeRecord[]; state: ScanState; 
 
 // % change over the next `sessions` sessions; a stock that stopped trading counts at its last price; undefined if
 // the history ends before the period does
-function forwardReturn(history: History, stock: StockHistory, barIndex: number, sessions: number): number | undefined {
+export function forwardReturn(history: History, stock: StockHistory, barIndex: number, sessions: number): number | undefined {
+  if (stock.dayIndex[barIndex] + sessions > history.days.length - 1) return undefined // the window runs past the data
   if (barIndex + sessions < stock.bars.length) return (stock.bars[barIndex + sessions].close / stock.bars[barIndex].close - 1) * 100
-  const stillTrading = stock.dayIndex[stock.dayIndex.length - 1] === history.days.length - 1
-  return stillTrading ? undefined : (stock.bars[stock.bars.length - 1].close / stock.bars[barIndex].close - 1) * 100
+  return (stock.bars[stock.bars.length - 1].close / stock.bars[barIndex].close - 1) * 100 // stopped trading: its last price
 }
 
 function longTermRebalance(history: History, day: number, today: { stock: StockHistory; barIndex: number; signal: StockSignal }[]): string[] {

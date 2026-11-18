@@ -109,13 +109,13 @@ Intraday: bought at the open, sold at the close or a stop 0.5× the average dail
 ## Long-term screen (top 20 by 12-month return ÷ volatility, above the 200-day average, every 21 sessions)
 | Held | Rebalances | Picks' avg return | All stocks' avg return | Picks beat the market |
 |---|---|---|---|---|
-| 126 sessions | 27 | +7.4% | +2.2% | 19 of 27 |
-| 252 sessions | 21 | +16.3% | -1.5% | 20 of 21 |
+| 126 sessions | 27 | +7.4% | +2.3% | 19 of 27 |
+| 252 sessions | 21 | +15.1% | -1.5% | 20 of 21 |
 
 Picks made in period 2 only (2025-11-01 →; a 252-session hold can't finish yet):
 | Held | Rebalances | Picks' avg return | All stocks' avg return | Picks beat the market |
 |---|---|---|---|---|
-| 126 sessions | 6 | +10.5% | +10.2% | 3 of 6 |
+| 126 sessions | 6 | +10.5% | +10.6% | 3 of 6 |
 | 252 sessions | 0 | – | – | – |
 
 ## One account — 10% cap on open risk, % of capital per year (simple, not compounded)

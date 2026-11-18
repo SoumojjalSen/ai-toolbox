@@ -29,7 +29,7 @@ const SME_SERIES = ["SM", "ST"]
 const IST_CLOSE_MS = (15 * 60 + 30) * 60_000
 
 // "13-Nov-2025 17:36:22" / "06-Jan-2024 17:58" → epoch ms (IST)
-function parseNseTimestamp(text: string): number {
+export function parseNseTimestamp(text: string): number {
   const [date, time = "00:00"] = text.trim().split(" ")
   return parseNseDate(date) + Number(time.slice(0, 2)) * 3_600_000 + Number(time.slice(3, 5)) * 60_000
 }
