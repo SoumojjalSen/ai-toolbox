@@ -158,6 +158,88 @@ function strategyTable(trades: TradeRecord[], groupBy: (trade: TradeRecord) => s
   return [TABLE_HEAD, ...[...groups].sort(([a], [b]) => a.localeCompare(b)).map(([label, tally]) => row(label, tally))].join("\n")
 }
 
+// ---------- one account: sizes by market type, a cap on open risk ----------
+
+export const MAX_OPEN_RISK_PERCENT = 10
+const RISK_BY_REGIME: Record<string, number> = { strong: 1, neutral: 0.5, weak: 0.25 } // the live sizes (scan.ts)
+const KEEP_MIN_TRADES = 30
+const KEEP_MIN_AVERAGE_R = 0.05
+
+type SizeTable = Map<string, number> // `${strategy}|${board}|${regime}` → % of capital risked per trade (0 = not traded)
+
+// A rule is kept for a board and market type only if it earned ≥ +0.05R a trade over ≥ 30 trades in period 1 —
+// decided on period 1 alone, then period 2 shows whether it held
+export function sizesFromPeriodOne(trades: TradeRecord[], marketTypes: "sized" | "strong only"): SizeTable {
+  const cells = new Map<string, Tally>()
+  for (const trade of trades) {
+    if (trade.signalDay >= CONFIRM_FROM) continue
+    const key = `${trade.strategy}|${trade.board}|${trade.regime}`
+    const tally = cells.get(key) ?? emptyTally()
+    add(tally, trade.result)
+    cells.set(key, tally)
+  }
+  const sizes: SizeTable = new Map()
+  for (const [key, tally] of cells) {
+    const regime = key.split("|")[2]
+    const kept = tally.closed >= KEEP_MIN_TRADES && tally.totalR / tally.closed >= KEEP_MIN_AVERAGE_R && (marketTypes === "sized" || regime === "strong")
+    sizes.set(key, kept ? RISK_BY_REGIME[regime] : 0)
+  }
+  return sizes
+}
+
+interface AccountResult { label: string; byYear: Map<string, number>; trades: number; skippedForRisk: number; maxDrawdown: number; total: number }
+
+// Trades are taken in signal order (rule priority, then RS) while open risk stays ≤ 10% of capital. Returns are
+// simple (not compounded): each trade adds r × its risk %.
+export function simulateAccount(label: string, history: History, trades: TradeRecord[], sizes: SizeTable, fromDay: string, toDay: string): AccountResult {
+  const priority = new Map(SWING_RULES.map((rule, index) => [rule.name, index]))
+  const candidates = trades
+    .filter((trade) => trade.signalDay >= fromDay && trade.signalDay < toDay && trade.result.kind === "closed" && (sizes.get(`${trade.strategy}|${trade.board}|${trade.regime}`) ?? 0) > 0)
+    .sort((a, b) => a.signalDay.localeCompare(b.signalDay) || priority.get(a.strategy)! - priority.get(b.strategy)! || b.relativeStrengthRank - a.relativeStrengthRank)
+  const open: { exitDay: string; risk: number; symbol: string }[] = []
+  const pnlByExitDay = new Map<string, number>()
+  let taken = 0
+  let skippedForRisk = 0
+  for (const trade of candidates) {
+    const result = trade.result as Extract<TradeResult, { kind: "closed" }>
+    const stock = history.stocks.get(trade.symbol)!
+    const entryDay = history.days[stock.dayIndex[result.entryIndex]]
+    const exitDay = history.days[stock.dayIndex[result.exitIndex]]
+    for (let index = open.length - 1; index >= 0; index--) if (open[index].exitDay < entryDay) open.splice(index, 1)
+    if (open.some((position) => position.symbol === trade.symbol)) continue // one position per stock
+    const risk = sizes.get(`${trade.strategy}|${trade.board}|${trade.regime}`)!
+    if (open.reduce((total, position) => total + position.risk, 0) + risk > MAX_OPEN_RISK_PERCENT) { skippedForRisk++; continue }
+    open.push({ exitDay, risk, symbol: trade.symbol })
+    taken++
+    pnlByExitDay.set(exitDay, (pnlByExitDay.get(exitDay) ?? 0) + result.r * risk)
+  }
+  const byYear = new Map<string, number>()
+  let equity = 0
+  let peak = 0
+  let maxDrawdown = 0
+  for (const [day, pnl] of [...pnlByExitDay].sort(([a], [b]) => a.localeCompare(b))) {
+    equity += pnl
+    peak = Math.max(peak, equity)
+    maxDrawdown = Math.max(maxDrawdown, peak - equity)
+    byYear.set(day.slice(0, 4), (byYear.get(day.slice(0, 4)) ?? 0) + pnl)
+  }
+  return { label, byYear, trades: taken, skippedForRisk, maxDrawdown, total: equity }
+}
+
+function accountTable(results: AccountResult[]): string {
+  const years = [...new Set(results.flatMap((result) => [...result.byYear.keys()]))].sort()
+  return [
+    `| Setup | Trades | Skipped (risk cap) | ${years.join(" | ")} | Total | Worst drop from a peak |`,
+    `|---|---|---|${years.map(() => "---").join("|")}|---|---|`,
+    ...results.map((result) => `| ${result.label} | ${result.trades} | ${result.skippedForRisk} | ${years.map((year) => `${fmt(result.byYear.get(year) ?? 0, 1)}%`).join(" | ")} | ${fmt(result.total, 1)}% | −${result.maxDrawdown.toFixed(1)}% |`),
+  ].join("\n")
+}
+
+function keptRules(sizes: SizeTable): string {
+  const kept = [...sizes].filter(([, size]) => size > 0).map(([key, size]) => `${key.replaceAll("|", " · ")} (${size}%)`)
+  return kept.length ? kept.join("; ") : "none"
+}
+
 // Big moves: from a session's close, +20% (or −20%) within 30 sessions. One row per move — the next move of the same
 // stock starts after this one's peak (trough).
 interface Move { symbol: string; board: Board; startIndex: number; endIndex: number; percent: number; startDay: string }
@@ -269,6 +351,14 @@ async function main() {
   const swingTrades = trades.filter((trade) => swing.has(trade.strategy))
   const intradayTrades = trades.filter((trade) => !swing.has(trade.strategy))
 
+  const sized = sizesFromPeriodOne(swingTrades, "sized")
+  const strongOnly = sizesFromPeriodOne(swingTrades, "strong only")
+  const currentLive: SizeTable = new Map(["strong", "neutral", "weak"].map((regime) => [`stage2-tight|main|${regime}`, RISK_BY_REGIME[regime]]))
+  const accounts = (fromDay: string, toDay = "9999") => [
+    simulateAccount("Live today: stage2-tight, main board, 1% / 0.5% / 0.25%", history, swingTrades, currentLive, fromDay, toDay),
+    simulateAccount("Kept rules, sized by market type", history, swingTrades, sized, fromDay, toDay),
+    simulateAccount("Kept rules, strong market only", history, swingTrades, strongOnly, fromDay, toDay),
+  ]
   const wholePeriod = moveCoverage(history, trades, state, SIGNALS_FROM, swing)
   const lastYear = moveCoverage(history, trades, state, lastYearFrom, swing)
   const report = [
@@ -292,6 +382,22 @@ async function main() {
     "| Held | Rebalances | Picks' avg return | All stocks' avg return | Picks beat the market |",
     "|---|---|---|---|---|",
     longTermTable(longTerm, SIGNALS_FROM),
+    "",
+    `Picks made in period 2 only (${CONFIRM_FROM} →; a 252-session hold can't finish yet):`,
+    "| Held | Rebalances | Picks' avg return | All stocks' avg return | Picks beat the market |",
+    "|---|---|---|---|---|",
+    longTermTable(longTerm, CONFIRM_FROM),
+    "",
+    `## One account — ${MAX_OPEN_RISK_PERCENT}% cap on open risk, % of capital per year (simple, not compounded)`,
+    `Kept (period 1: ≥ ${KEEP_MIN_TRADES} trades and ≥ +${KEEP_MIN_AVERAGE_R}R a trade), sized: ${keptRules(sized)}`,
+    "",
+    `Strong market only: ${keptRules(strongOnly)}`,
+    "",
+    "Period 1 (rules chosen here):",
+    accountTable(accounts(SIGNALS_FROM, CONFIRM_FROM)),
+    "",
+    `Period 2 only (${CONFIRM_FROM} →, the check):`,
+    accountTable(accounts(CONFIRM_FROM)),
     "",
     `## Big moves — whole period (${SIGNALS_FROM} → ${lastDay}), all swing rules`,
     wholePeriod.text,

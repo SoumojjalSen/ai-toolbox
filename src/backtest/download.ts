@@ -71,14 +71,15 @@ async function downloadPrices(from: Date, to: Date) {
 }
 
 // Long ranges are split so each API call stays small
-async function fetchInChunks<T>(label: string, from: Date, to: Date, chunkDays: number, path: (from: string, to: string) => string, pick: (body: unknown) => T[]): Promise<T[]> {
+async function fetchInChunks<T>(label: string, from: Date, to: Date, chunkDays: number, path: (from: string, to: string) => string, pick: (body: unknown) => T[], parallel = 1): Promise<T[]> {
+  const ranges: [Date, Date][] = []
+  for (let start = from; start <= to; start = addDays(start, chunkDays)) ranges.push([start, addDays(start, chunkDays - 1) < to ? addDays(start, chunkDays - 1) : to])
   const rows: T[] = []
-  for (let start = from; start <= to; start = addDays(start, chunkDays)) {
-    const end = addDays(start, chunkDays - 1) < to ? addDays(start, chunkDays - 1) : to
-    rows.push(...pick(await fetchJson<unknown>(path(ddmmyyyy(start), ddmmyyyy(end)))))
-    process.stdout.write(`\r  ${label} through ${isoDate(end)} (${rows.length} rows)`)
+  for (let index = 0; index < ranges.length; index += parallel) {
+    const batch = await Promise.all(ranges.slice(index, index + parallel).map(([start, end]) => fetchJson<unknown>(path(ddmmyyyy(start), ddmmyyyy(end))).then(pick)))
+    rows.push(...batch.flat())
+    console.log(`  ${label} through ${isoDate(ranges[Math.min(index + parallel, ranges.length) - 1][1])} (${rows.length} rows)`)
   }
-  process.stdout.write("\n")
   return rows
 }
 
@@ -96,7 +97,7 @@ async function downloadEvents(from: Date, to: Date) {
 
   // one day per call: a results-season day has ~1,500 announcements
   const results = await fetchInChunks("results filings", from, to, 1, (a, b) => `corporate-announcements?index=equities&from_date=${a}&to_date=${b}`,
-    (body) => (body as Announcement[]).filter((row) => RESULTS_TEXT.test(row.attchmntText ?? "")).map((row) => ({ symbol: row.symbol, filedAt: row.an_dt })))
+    (body) => (body as Announcement[]).filter((row) => RESULTS_TEXT.test(row.attchmntText ?? "")).map((row) => ({ symbol: row.symbol, filedAt: row.an_dt })), 5)
   await writeGz("results-filings.json.gz", JSON.stringify(results))
 }
 
