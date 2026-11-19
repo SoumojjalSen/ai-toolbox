@@ -59,10 +59,10 @@ Read as an email on a phone. Layout rules:
 
 Start with a green callout **Do now** — at most 5 short lines, the actions only:
 `> 🟢 **Do now**` then **one bullet per action**, each on its own `> - ` line, e.g.:
-`> - **Buy** at the 9:15 open (limit): STOCKA, STOCKB — the 9:09 email confirms each at its opening price`
+`> - **Buy** at the 9:15 open (limit): STOCKA, STOCKB — the pre-open check at the top of this email gives each one's opening price`
 `> - **Exit:** STOCKC`
 `> - **IPO:** <IPO A> — apply (QIB already 47×) · <IPO B> — likely skip, confirm at 16:15` No buys allowed today (neutral or weak market) → "No new swing buys — market <neutral/weak>; see the watchlist and long-term picks". Buys allowed but nothing passed → "No buys today — nothing passed every check".
-Only when there are picks, one line: "Place a limit order for the **9:15 open**, no higher than 1% above the entry — the 9:09 email shows each pick's opening price; if it opens above the limit the order doesn't fill (skip). Set the stop loss and target as a GTT order. Hold until the target, the stop loss or the sell-by date. Quantity = (<risk %> of capital) ÷ (entry − stop loss)." with each pick's risk % from its row.
+Only when there are picks, one line: "Place a limit order for the **9:15 open**, no higher than 1% above the entry — the pre-open check at the top of this email shows each pick's opening price; if it opens above the limit the order doesn't fill (skip). Set the stop loss and target as a GTT order. Hold until the target, the stop loss or the sell-by date. Quantity = (<risk %> of capital) ÷ (entry − stop loss)." with each pick's risk % from its row.
 
 ### 1. Swing picks (hold up to ~6–12 weeks) — news-checked
 **Every** `go` pick, most lenses first, then RS. Stock table. Analysis & proof = the rule that fired and its risk % (e.g. "insider-buy · risk 0.5%"), the key finding of the news check (latest results in one phrase, e.g. "Q2 profit +38%") + the agreeing lenses, ending with confidence (High / Medium / Low). No buys allowed today → this section is one line: "No new swing buys — market <neutral/weak>." Below it: "Dropped after the news check: SYMBOL — reason" for each drop.

@@ -35,3 +35,9 @@ test("previousSessionClose: 15:30 IST of the last trading day before today", asy
   assert.equal(previousSessionClose(monday, new Set(["20-Nov-2026"])), new Date("19 Nov 2026 15:30:00 GMT+0530").getTime())
 })
 
+
+test("morningReportBlock: the 8:30 report goes under the 9:09 check; a missing report is said, not hidden", async () => {
+  const { morningReportBlock } = await import("../../src/services/market/alert.js")
+  assert.equal(morningReportBlock("# Pre-market briefing — Thursday\n\n> 🟢 **Do now**"), "---\n\n# Morning report (written 8:30)\n\n## Pre-market briefing — Thursday\n\n> 🟢 **Do now**")
+  assert.equal(morningReportBlock(undefined), "> ⚠️ This morning's report wasn't written — the 8:30 run failed or is still running. The check above is complete on its own.")
+})

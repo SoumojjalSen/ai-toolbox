@@ -2,7 +2,7 @@ import { fetchNse, fetchNseJson } from "./nse.js"
 import { fetchMarketLenses, type CompanyEvent, type EventKind } from "./lenses.js"
 import { readHoldings } from "./holdings.js"
 import { buildIpoClosingToday, fetchHolidays } from "./ipo.js"
-import { readJson, writeJson, todayIst, nseDate, parseNseDate } from "./store.js"
+import { readJson, readText, writeJson, todayIst, nseDate, parseNseDate } from "./store.js"
 import { findOpenTrades, tradeStatus, buyLimit, type ReportPick } from "./scorecard.js"
 import type { ScanFlags } from "./scan.js"
 import { convertMarkdownToEmailHtml, markdownTable as table, tableCell } from "../../formats.js"
@@ -180,6 +180,13 @@ const chart = (symbol: string) => `[chart](https://www.tradingview.com/chart/?sy
 
 export interface MarketEmail { count: number; subject: string; html: string }
 
+// One morning email: the report (written by the 8:30 run, not emailed on its own) goes under the 9:09 check, its
+// title demoted one level so the check's title leads
+export function morningReportBlock(report: string | undefined): string {
+  if (!report) return "> ⚠️ This morning's report wasn't written — the 8:30 run failed or is still running. The check above is complete on its own."
+  return `---\n\n# Morning report (written 8:30)\n\n${report.replace(/^# /, "## ")}`
+}
+
 export async function buildMarketCheck(): Promise<MarketEmail> {
   const timeIst = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(11, 16)
   const isPreOpen = timeIst < "09:15"
@@ -263,14 +270,17 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
       ? `${live.risingSinceOpen} stocks set to open higher vs ${live.fallingSinceOpen} lower`
       : `${live.risingSinceOpen} stocks rising vs ${live.fallingSinceOpen} falling since the open`,
   ].filter(Boolean).join(" · ")
+  const morningReport = isPreOpen ? morningReportBlock(await readText(`reports/${todayIst()}.md`)) : undefined
   const markdown = [
     `# Market check — ${timeIst}`,
     `> 🟢 **Do now**\n>\n> ${(doNow.length ? doNow : ["Nothing to do now."]).map((item) => `- ${item}`).join("\n> ")}`,
     ...blocks,
     `> ${marketLine}`,
+    ...(morningReport ? [morningReport] : []),
   ].join("\n\n")
 
   const count = 1 + reportPicks.length + openTrades.length + holdingRows.length + ipo.calls.length // ≥1: sent on every trading day
   const subjectParts = [reportPicks.length ? "picks: buy or skip" : "", news.length ? `${news.length} overnight filings` : "", ipo.calls.length ? "IPOs closing today" : "", holdingRows.length ? `${holdingRows.length} holdings moving` : "", doNow.length ? "" : "nothing to do"].filter(Boolean)
-  return { count, subject: `📈 Market check ${timeIst} — ${subjectParts.join(", ")}`, html: convertMarkdownToEmailHtml(markdown) }
+  const title = isPreOpen ? `📈 Morning report + pre-open check ${timeIst}` : `📈 Market check ${timeIst}`
+  return { count, subject: `${title} — ${subjectParts.join(", ")}`, html: convertMarkdownToEmailHtml(markdown) }
 }
