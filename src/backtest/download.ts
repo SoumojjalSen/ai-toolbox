@@ -7,6 +7,7 @@
 //   results-filings.json.gz         when each company filed its quarterly results (from NSE announcements)
 //   filings.json.gz                 every material company filing (acquisition, order, fund raise…), typed by the live
 //                                   classifier (lenses.ts) — the overnight-news rule's input
+//   deals.json.gz                   bulk and block deals: who bought or sold ≥ 0.5% of a company in one session (NSE)
 //   listings.json.gz                listing date and issue price of every IPO NSE lists (main board and SME)
 //   equity-list.csv.gz, nifty500.csv.gz   listing dates of all main-board stocks; sectors of the Nifty 500
 import { mkdir, readFile, writeFile, readdir } from "fs/promises"
@@ -17,6 +18,7 @@ import { fetchNse } from "../services/market/nse.js"
 import { toAdjustments } from "../services/market/adjust.js"
 import { parseNseDate } from "../services/market/store.js"
 import { classifyAnnouncement } from "../services/market/lenses.js"
+import { parseDealsCsv, type Deal } from "../services/market/rule-inputs.js"
 
 export const HISTORY_DIR = join(process.cwd(), "data", "market-history")
 const API = "https://www.nseindia.com/api/"
@@ -111,6 +113,21 @@ export async function downloadAnnouncements(from: Date, to: Date) {
   })))
 }
 
+// Bulk and block deals, a month per call. The JSON API stops at 70 rows; its CSV form has them all.
+export async function downloadDeals(from: Date, to: Date) {
+  const deals: Deal[] = []
+  for (let start = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1)); start <= to; start = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))) {
+    const end = new Date(Math.min(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0), to.getTime()))
+    for (const kind of ["bulk", "block"]) {
+      const response = await fetchWithRetry(`${API}historicalOR/bulk-block-short-deals?optionType=${kind}_deals&from=${ddmmyyyy(start)}&to=${ddmmyyyy(end)}&csv=true`)
+      if (!response?.ok) throw new Error(`NSE ${kind} deals ${isoDate(start)}: ${response?.status ?? "no answer"}`)
+      deals.push(...parseDealsCsv(await response.text(), kind))
+    }
+    console.log(`  deals through ${isoDate(end)} (${deals.length} rows)`)
+  }
+  await writeGz("deals.json.gz", JSON.stringify(deals))
+}
+
 async function downloadLists() {
   const listings = await fetchJson<{ symbol: string; securityType: string; issuePrice: string; listingDate: string; ipoStartDate: string }[]>("public-past-issues")
   await writeGz("listings.json.gz", JSON.stringify(listings.map(({ symbol, securityType, issuePrice, listingDate, ipoStartDate }) => ({ symbol, board: securityType, issuePrice: Number(issuePrice) || undefined, listingDate, ipoStartDate }))))
@@ -128,5 +145,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   await downloadLists()
   await downloadPrices(from, to)
   await downloadEvents(from, to)
+  await downloadDeals(from, to)
   console.log("done")
 }

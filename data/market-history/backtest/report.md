@@ -10,6 +10,10 @@ Intraday: bought at the open, sold at the close or a stop 0.5× the average dail
 |---|---|---|---|---|---|---|
 | acquisition-news · main · 1 set | 1743 | 37% | -0.01 | -16 | 17 | 4 |
 | acquisition-news · main · 2 confirm | 1030 | 32% | -0.11 | -111 | 16 | 4 |
+| bulk-deal-buy · main · 1 set | 881 | 40% | +0.09 | +76 | 17 | 424 |
+| bulk-deal-buy · main · 2 confirm | 463 | 33% | -0.11 | -53 | 16 | 212 |
+| bulk-deal-buy · sme · 1 set | 40 | 25% | -0.24 | -10 | 12 | 33 |
+| bulk-deal-buy · sme · 2 confirm | 30 | 17% | -0.36 | -11 | 10 | 37 |
 | insider-buy · main · 1 set | 353 | 35% | +0.18 | +63 | 28 | 115 |
 | insider-buy · main · 2 confirm | 199 | 33% | +0.08 | +15 | 23 | 39 |
 | insider-buy · sme · 1 set | 23 | 39% | +0.24 | +6 | 24 | 16 |
@@ -40,6 +44,18 @@ Intraday: bought at the open, sold at the close or a stop 0.5× the average dail
 | acquisition-news · main · strong · 2 confirm | 205 | 38% | +0.05 | +11 | 17 | 1 |
 | acquisition-news · main · weak · 1 set | 448 | 38% | +0.02 | +7 | 17 | 0 |
 | acquisition-news · main · weak · 2 confirm | 368 | 33% | -0.02 | -7 | 15 | 0 |
+| bulk-deal-buy · main · neutral · 1 set | 412 | 38% | +0.03 | +12 | 17 | 182 |
+| bulk-deal-buy · main · neutral · 2 confirm | 186 | 28% | -0.17 | -31 | 16 | 110 |
+| bulk-deal-buy · main · strong · 1 set | 293 | 43% | +0.16 | +47 | 18 | 173 |
+| bulk-deal-buy · main · strong · 2 confirm | 89 | 47% | +0.30 | +27 | 19 | 45 |
+| bulk-deal-buy · main · weak · 1 set | 176 | 39% | +0.10 | +17 | 19 | 69 |
+| bulk-deal-buy · main · weak · 2 confirm | 188 | 30% | -0.26 | -49 | 14 | 57 |
+| bulk-deal-buy · sme · neutral · 1 set | 22 | 27% | -0.30 | -7 | 14 | 14 |
+| bulk-deal-buy · sme · neutral · 2 confirm | 14 | 7% | -0.74 | -10 | 10 | 23 |
+| bulk-deal-buy · sme · strong · 1 set | 7 | 14% | -0.47 | -3 | 13 | 12 |
+| bulk-deal-buy · sme · strong · 2 confirm | 2 | 50% | +0.93 | +2 | 10 | 6 |
+| bulk-deal-buy · sme · weak · 1 set | 11 | 27% | +0.01 | +0 | 5 | 7 |
+| bulk-deal-buy · sme · weak · 2 confirm | 14 | 21% | -0.15 | -2 | 11 | 8 |
 | insider-buy · main · neutral · 1 set | 143 | 28% | -0.07 | -10 | 25 | 53 |
 | insider-buy · main · neutral · 2 confirm | 57 | 11% | -0.58 | -33 | 20 | 10 |
 | insider-buy · main · strong · 1 set | 83 | 41% | +0.51 | +42 | 26 | 20 |
@@ -127,38 +143,38 @@ Picks made in period 2 only (2025-11-01 →; a 252-session hold can't finish yet
 | 252 sessions | 0 | – | – | – |
 
 ## One account — 10% cap on open risk, % of capital per year (simple, not compounded)
-Kept (period 1: ≥ 30 trades and ≥ +0.05R a trade), sized: results-day · main · neutral (0.5%); insider-buy · main · strong (1%); new-listing-breakout · main · strong (1%); stage2-tight · main · strong (1%); sector-leader · main · strong (1%); leader-pullback · main · strong (1%); results-day · main · strong (1%); stage2-tight · main · weak (0.25%); insider-buy · main · weak (0.25%); sector-leader · main · weak (0.25%); new-listing-breakout · sme · weak (0.25%)
+Kept (period 1: ≥ 30 trades and ≥ +0.05R a trade), sized: results-day · main · neutral (0.5%); insider-buy · main · strong (1%); bulk-deal-buy · main · strong (1%); new-listing-breakout · main · strong (1%); stage2-tight · main · strong (1%); sector-leader · main · strong (1%); leader-pullback · main · strong (1%); results-day · main · strong (1%); stage2-tight · main · weak (0.25%); bulk-deal-buy · main · weak (0.25%); insider-buy · main · weak (0.25%); sector-leader · main · weak (0.25%); new-listing-breakout · sme · weak (0.25%)
 
-Strong market only: insider-buy · main · strong (1%); new-listing-breakout · main · strong (1%); stage2-tight · main · strong (1%); sector-leader · main · strong (1%); leader-pullback · main · strong (1%); results-day · main · strong (1%)
+Strong market only: insider-buy · main · strong (1%); bulk-deal-buy · main · strong (1%); new-listing-breakout · main · strong (1%); stage2-tight · main · strong (1%); sector-leader · main · strong (1%); leader-pullback · main · strong (1%); results-day · main · strong (1%)
 
 Period 1 (rules chosen here):
 | Setup | Trades | Skipped (risk cap) | 2023 | 2024 | 2025 | 2026 | Total | Worst drop from a peak |
 |---|---|---|---|---|---|---|---|---|
 | Before (pushed 18 Nov morning): stage2-tight, main board, 1% / 0.5% / 0.25% | 590 | 5076 | +6.1% | +22.3% | -26.1% | +1.5% | +3.8% | −46.1% |
-| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 143 | 3994 | -0.6% | +17.1% | +6.0% | +0.0% | +22.5% | −19.1% |
-| Kept rules, sized by market type | 543 | 4639 | +19.6% | +33.2% | -16.0% | -0.6% | +36.1% | −37.8% |
-| Kept rules, strong market only | 143 | 3994 | -0.6% | +17.1% | +6.0% | +0.0% | +22.5% | −19.1% |
+| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 140 | 4285 | +0.5% | +38.6% | +7.3% | +0.0% | +46.3% | −16.8% |
+| Kept rules, sized by market type | 600 | 5040 | +19.6% | +29.5% | -13.1% | -0.4% | +35.7% | −37.0% |
+| Kept rules, strong market only | 140 | 4285 | +0.5% | +38.6% | +7.3% | +0.0% | +46.3% | −16.8% |
 
 Period 2 only (2025-11-01 →, the check):
 | Setup | Trades | Skipped (risk cap) | 2025 | 2026 | Total | Worst drop from a peak |
 |---|---|---|---|---|---|---|
 | Before (pushed 18 Nov morning): stage2-tight, main board, 1% / 0.5% / 0.25% | 333 | 1400 | +0.5% | -1.5% | -0.9% | −15.1% |
-| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 48 | 851 | +0.0% | +28.5% | +28.5% | −4.4% |
-| Kept rules, sized by market type | 341 | 1441 | -5.4% | +7.0% | +1.6% | −20.6% |
-| Kept rules, strong market only | 48 | 851 | +0.0% | +28.5% | +28.5% | −4.4% |
+| **Live now** (strategies.ts LIVE_RISK_PERCENT) | 53 | 936 | +0.0% | +38.2% | +38.2% | −4.3% |
+| Kept rules, sized by market type | 370 | 1682 | -6.2% | +12.1% | +6.0% | −26.4% |
+| Kept rules, strong market only | 53 | 936 | +0.0% | +38.2% | +38.2% | −4.3% |
 
 ## Big moves — whole period (2023-11-01 → 2026-11-17), all swing rules
 **Rises of 20%+ within 30 sessions since 2023-11-01: 21378** (16493 in stocks the scan covered that day)
 
 | Result | Moves | Examples |
 |---|---|---|
-| missed: no rule fired | 11452 (54%) | 20MICRONS +26% from 2024-03-13; 20MICRONS +23% from 2025-02-11; 20MICRONS +23% from 2025-03-17; 20MICRONS +22% from 2025-06-10; 20MICRONS +22% from 2026-03-16; 3IINFOLTD +30% from 2023-11-01 |
-| caught | 4654 (22%) | 20MICRONS +27% from 2024-05-08; 20MICRONS +31% from 2024-06-24; 20MICRONS +23% from 2024-08-05; 20MICRONS +22% from 2026-05-18; 20MICRONS +21% from 2026-08-11; 3IINFOLTD +20% from 2023-11-24 |
-| missed: not scanned (turnover under ₹50 lakh) | 2896 (14%) | 21STCENMGM +64% from 2023-11-01; 21STCENMGM +165% from 2023-12-18; 21STCENMGM +22% from 2025-11-14; 21STCENMGM +22% from 2026-03-25; 21STCENMGM +21% from 2026-06-12; 21STCENMGM +27% from 2026-09-03 |
+| missed: no rule fired | 11130 (52%) | 20MICRONS +26% from 2024-03-13; 20MICRONS +23% from 2025-02-11; 20MICRONS +23% from 2025-03-17; 20MICRONS +22% from 2025-06-10; 20MICRONS +22% from 2026-03-16; 3IINFOLTD +30% from 2023-11-01 |
+| caught | 4864 (23%) | 20MICRONS +27% from 2024-05-08; 20MICRONS +31% from 2024-06-24; 20MICRONS +23% from 2024-08-05; 20MICRONS +22% from 2026-05-18; 20MICRONS +21% from 2026-08-11; 3IINFOLTD +20% from 2023-11-24 |
+| missed: not scanned (turnover under ₹50 lakh) | 2895 (14%) | 21STCENMGM +64% from 2023-11-01; 21STCENMGM +165% from 2023-12-18; 21STCENMGM +22% from 2025-11-14; 21STCENMGM +22% from 2026-03-25; 21STCENMGM +21% from 2026-06-12; 21STCENMGM +27% from 2026-09-03 |
 | missed: not scanned (SME, turnover under ₹10 lakh) | 1406 (7%) | AISL +21% from 2023-11-17; AISL +22% from 2024-02-02; AISL +25% from 2024-02-19; AISL +20% from 2025-02-07; AISL +25% from 2025-04-25; AISL +21% from 2025-07-09 |
-| rule fired but skipped (above buy limit) | 599 (3%) | 3MINDIA +21% from 2024-04-29; AAREYDRUGS +38% from 2024-07-16; ABB +22% from 2024-01-24; AIRAN +31% from 2024-11-18; AJMERA +26% from 2024-01-19; ALANKIT +66% from 2023-11-01 |
-| missed: too new (under 6 sessions) | 331 (2%) | CCCL +47% from 2024-09-10; DOLPHIN +29% from 2024-04-15; ARE&M +26% from 2023-11-01; SICALLOG +22% from 2026-07-01; SAMPANN +44% from 2023-11-01; TCLCONS +123% from 2023-11-01 |
-| rule fired but skipped (locked at upper limit) | 40 (0%) | DHRUV +37% from 2024-02-06; GTLINFRA +28% from 2024-02-02; INDOTECH +21% from 2025-04-04; KPIGREEN +49% from 2024-01-31; OMAXAUTO +97% from 2024-01-03; PAYTM +22% from 2024-05-06 |
+| rule fired but skipped (above buy limit) | 709 (3%) | 3MINDIA +21% from 2024-04-29; AAREYDRUGS +38% from 2024-07-16; AAVAS +22% from 2024-03-13; ABB +22% from 2024-01-24; ADANIENT +26% from 2026-04-29; ADORWELD +24% from 2024-06-04 |
+| missed: too new (under 6 sessions) | 326 (2%) | CCCL +47% from 2024-09-10; DOLPHIN +29% from 2024-04-15; ARE&M +26% from 2023-11-01; SICALLOG +22% from 2026-07-01; SAMPANN +44% from 2023-11-01; TCLCONS +123% from 2023-11-01 |
+| rule fired but skipped (locked at upper limit) | 48 (0%) | DHRUV +37% from 2024-02-06; E2E +28% from 2025-03-25; GTLINFRA +28% from 2024-02-02; INDOTECH +21% from 2025-04-04; KPIGREEN +49% from 2024-01-31; OMAXAUTO +97% from 2024-01-03 |
 
 Caught, by rule (a move can be caught by more than one rule; R = what the trade made, closed trades only):
 
@@ -168,16 +184,19 @@ Caught, by rule (a move can be caught by more than one rule; R = what the trade 
 | leader-pullback | 2072 | +1.01 |
 | acquisition-news | 806 | +1.12 |
 | new-listing-breakout | 447 | +0.84 |
+| bulk-deal-buy | 418 | +1.15 |
 | results-day | 398 | +0.76 |
 | sector-leader | 300 | +1.09 |
 | insider-buy | 223 | +1.26 |
 
-**Falls of 20%+ within 30 sessions since 2023-11-01: 15208.** A swing trade was open (or bought) during 3401 of them (22.4%); those trades made -3271R in total (stops limit the damage).
+**Falls of 20%+ within 30 sessions since 2023-11-01: 15208.** A swing trade was open (or bought) during 3639 of them (23.9%); those trades made -3598R in total (stops limit the damage).
 
 ## Final test — the last year (2025-11-17 → 2026-11-17), all swing rules
 | Group | Closed trades | Win rate | Avg R | Total R | Avg sessions held | Skipped |
 |---|---|---|---|---|---|---|
 | acquisition-news · main | 979 | 32% | -0.08 | -82 | 16 | 4 |
+| bulk-deal-buy · main | 444 | 33% | -0.10 | -45 | 16 | 206 |
+| bulk-deal-buy · sme | 27 | 19% | -0.25 | -7 | 11 | 35 |
 | insider-buy · main | 191 | 34% | +0.12 | +22 | 24 | 38 |
 | insider-buy · sme | 12 | 25% | -0.18 | -2 | 28 | 3 |
 | leader-pullback · main | 1626 | 31% | -0.10 | -160 | 16 | 463 |
@@ -193,13 +212,13 @@ Caught, by rule (a move can be caught by more than one rule; R = what the trade 
 
 | Result | Moves | Examples |
 |---|---|---|
-| missed: no rule fired | 3896 (51%) | 20MICRONS +22% from 2026-03-16; 3IINFOLTD +21% from 2026-02-25; 3IINFOLTD +24% from 2026-06-10; 3IINFOLTD +40% from 2026-07-24; 5PAISA +22% from 2025-12-03; 5PAISA +22% from 2026-03-23 |
-| caught | 1373 (18%) | 20MICRONS +22% from 2026-05-18; 20MICRONS +21% from 2026-08-11; 63MOONS +29% from 2026-07-14; 63MOONS +22% from 2026-10-05; AAREYDRUGS +22% from 2026-01-12; AAREYDRUGS +22% from 2026-03-02 |
+| missed: no rule fired | 3759 (49%) | 20MICRONS +22% from 2026-03-16; 3IINFOLTD +21% from 2026-02-25; 3IINFOLTD +24% from 2026-06-10; 3IINFOLTD +40% from 2026-07-24; 5PAISA +22% from 2025-12-03; 5PAISA +22% from 2026-03-23 |
+| caught | 1469 (19%) | 20MICRONS +22% from 2026-05-18; 20MICRONS +21% from 2026-08-11; 63MOONS +29% from 2026-07-14; 63MOONS +22% from 2026-10-05; AAREYDRUGS +22% from 2026-01-12; AAREYDRUGS +22% from 2026-03-02 |
 | missed: not scanned (turnover under ₹50 lakh) | 1338 (18%) | 21STCENMGM +24% from 2025-11-17; 21STCENMGM +22% from 2026-03-25; 21STCENMGM +21% from 2026-06-12; 21STCENMGM +27% from 2026-09-03; 21STCENMGM +25% from 2026-10-21; 3PLAND +23% from 2026-03-16 |
 | missed: not scanned (SME, turnover under ₹10 lakh) | 733 (10%) | AISL +23% from 2026-06-01; AISL +21% from 2026-08-05; AISL +35% from 2026-10-09; AMIABLE +50% from 2025-11-17; AMIABLE +24% from 2026-03-25; AMIABLE +28% from 2026-05-11 |
-| rule fired but skipped (above buy limit) | 155 (2%) | ALLCARGO +44% from 2026-08-07; APLLTD +23% from 2026-09-28; APOLLOPIPE +23% from 2026-01-14; ASTRAMICRO +33% from 2026-04-28; AUSOMENT +31% from 2026-05-18; AVADHSUGAR +70% from 2026-04-07 |
-| missed: too new (under 6 sessions) | 139 (2%) | SICALLOG +22% from 2026-07-01; DIGJAMLMTD +32% from 2025-12-09; TEAMGTY +29% from 2025-11-17; CAPILLARY +21% from 2025-11-21; MEESHO +38% from 2025-12-10; WAAREEINDO +35% from 2026-04-06 |
-| rule fired but skipped (locked at upper limit) | 7 (0%) | TERASOFT +26% from 2026-01-27; EXCEL +32% from 2025-12-08; IBULLSLTD +21% from 2026-08-21; AGUL +21% from 2026-02-06; ESCONET +24% from 2026-10-21; DIVINEHIRA +22% from 2026-02-09 |
+| rule fired but skipped (above buy limit) | 195 (3%) | ADANIENT +26% from 2026-04-29; ALLCARGO +44% from 2026-08-07; APLLTD +23% from 2026-09-28; APOLLOPIPE +23% from 2026-01-14; ASTRAMICRO +33% from 2026-04-28; AUSOMENT +31% from 2026-05-18 |
+| missed: too new (under 6 sessions) | 136 (2%) | SICALLOG +22% from 2026-07-01; DIGJAMLMTD +32% from 2025-12-09; TEAMGTY +29% from 2025-11-17; CAPILLARY +21% from 2025-11-21; MEESHO +38% from 2025-12-10; WAAREEINDO +35% from 2026-04-06 |
+| rule fired but skipped (locked at upper limit) | 11 (0%) | TERASOFT +26% from 2026-01-27; EXCEL +32% from 2025-12-08; IBULLSLTD +21% from 2026-08-21; GRETEX +35% from 2025-11-17; MOS +21% from 2026-09-09; AGUL +21% from 2026-02-06 |
 
 Caught, by rule (a move can be caught by more than one rule; R = what the trade made, closed trades only):
 
@@ -209,11 +228,12 @@ Caught, by rule (a move can be caught by more than one rule; R = what the trade 
 | leader-pullback | 692 | +1.00 |
 | acquisition-news | 298 | +1.03 |
 | new-listing-breakout | 170 | +1.12 |
+| bulk-deal-buy | 156 | +1.03 |
 | results-day | 128 | +0.84 |
 | sector-leader | 79 | +1.14 |
 | insider-buy | 69 | +1.35 |
 
-**Falls of 20%+ within 30 sessions since 2025-11-17: 6000.** A swing trade was open (or bought) during 1045 of them (17.4%); those trades made -1150R in total (stops limit the damage).
+**Falls of 20%+ within 30 sessions since 2025-11-17: 6000.** A swing trade was open (or bought) during 1155 of them (19.3%); those trades made -1301R in total (stops limit the damage).
 
 
 Every rise, with its result: `backtest/moves-up.csv` (symbol, board, start, peak, %, result, rules that caught it).

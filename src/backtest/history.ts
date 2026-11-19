@@ -4,7 +4,7 @@ import { parseDailyPriceFile, parseNseTimestamp, type DailyPriceRow } from "../s
 export { parseNseTimestamp }
 import { adjustForCorporateActions, type PriceAdjustment } from "../services/market/adjust.js"
 import { parseNseDate } from "../services/market/store.js"
-import { isInsiderMarketBuy, type Board } from "../services/market/strategies.js"
+import { isInsiderMarketBuy, keptBuyValues, type Board } from "../services/market/strategies.js"
 import { HISTORY_DIR, readGz } from "./download.js"
 
 // Everything the backtest reads, from data/market-history (see download.ts), indexed by session.
@@ -23,6 +23,7 @@ export interface History {
   stocks: Map<string, StockHistory>
   resultsFiledAt: Map<string, number[]> // symbol → epoch ms
   acquisitionsFiledAt: Map<string, number[]> // symbol → epoch ms of each acquisition filing (lenses.ts classifier)
+  keptBuys: Map<number, Map<string, number>> // day index → symbol → ₹ kept by bulk/block-deal buyers (keptBuyValues)
   insiderBuys: Map<string, Map<number, number>> // symbol → day index → ₹ bought (promoters, directors, KMP; market purchases)
   sectorOf: Map<string, string> // Nifty 500 only (today's list)
 }
@@ -94,6 +95,12 @@ export async function loadHistory(): Promise<History> {
   }
 
   const dayOf = new Map(days.map((day, index) => [day, index]))
+  const dealsByDay = new Map<number, { symbol: string; client: string; side: string; quantity: number; price: number }[]>()
+  for (const deal of JSON.parse(await readGz("deals.json.gz")) as { date: string; symbol: string; client: string; side: string; quantity: number; price: number }[]) {
+    const day = dayOf.get(isoFromEpoch(parseNseDate(deal.date)))
+    if (day !== undefined) dealsByDay.set(day, [...(dealsByDay.get(day) ?? []), deal])
+  }
+  const keptBuys = new Map([...dealsByDay].map(([day, deals]) => [day, keptBuyValues(deals)]))
   const insiderBuys = new Map<string, Map<number, number>>()
   for (const trade of JSON.parse(await readGz("insider-trades.json.gz")) as { symbol: string; personCategory: string; acqMode: string; type: string; secType: string; value: number; disclosed: string }[]) {
     if (!isInsiderMarketBuy(trade)) continue
@@ -111,5 +118,5 @@ export async function loadHistory(): Promise<History> {
     const fields = line.split(",").map((field) => field.trim())
     if (fields[2]) sectorOf.set(fields[2], fields[1])
   }
-  return { days, closeTimes, stocks, resultsFiledAt, acquisitionsFiledAt, insiderBuys, sectorOf }
+  return { days, closeTimes, stocks, resultsFiledAt, acquisitionsFiledAt, keptBuys, insiderBuys, sectorOf }
 }

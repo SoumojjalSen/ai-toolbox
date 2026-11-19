@@ -254,6 +254,7 @@ export function rankSwingSetups(days: StockDay[], marketType: MarketType): Trade
 // Today's inputs for the pick rules, one per scanned stock — the live twin of the backtest's day loop (run.ts)
 export function buildStockDays(sessions: DailyPriceRow[][], sessionDates: string[], stockSignals: StockSignal[], inputs: {
   listedOn: Map<string, number>; sectorOf: Map<string, string>; insiderBuyValue: (symbol: string, sessionDate: string) => number; resultsFiledAt: Map<string, string>
+  keptBuyValue: (symbol: string, sessionDate: string) => number
   acquisitionsFiledAt: Map<string, string[]> // symbol → NSE filing times of acquisition filings
 }): StockDay[] {
   const historyBySymbol = new Map<string, DailyPriceRow[]>()
@@ -275,6 +276,7 @@ export function buildStockDays(sessions: DailyPriceRow[][], sessionDates: string
       resultsFiledAfterTodaysClose: filedTime !== undefined && filedTime > lastClose,
       insiderBuyValueToday: inputs.insiderBuyValue(signal.symbol, sessionDates[sessionDates.length - 1]),
       acquisitionFiledAfterTodaysClose: (inputs.acquisitionsFiledAt.get(signal.symbol) ?? []).some((time) => parseNseTimestamp(time) > lastClose),
+      keptBuyValueToday: inputs.keptBuyValue(signal.symbol, sessionDates[sessionDates.length - 1]),
       inLeadingSector: sectors.has(inputs.sectorOf.get(signal.symbol) ?? ""),
     }
   })

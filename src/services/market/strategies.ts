@@ -8,7 +8,7 @@ export type Board = "main" | "sme"
 export type StrategyName =
   | "stage2-tight" | "leader-pullback" | "new-listing-breakout" | "results-day" | "insider-buy" | "sector-leader"
   | "intraday-results-gap" | "intraday-accumulation" | "intraday-stage2"
-  | "acquisition-news"
+  | "acquisition-news" | "bulk-deal-buy"
 
 export interface StockDay {
   bars: DailyPriceRow[] // history ending today, adjusted for splits/bonuses (up to ~220 sessions)
@@ -19,6 +19,7 @@ export interface StockDay {
   resultsFiledAfterTodaysClose: boolean // known before tomorrow's open
   insiderBuyValueToday: number // ₹ of promoter/director market purchases disclosed today
   acquisitionFiledAfterTodaysClose: boolean // the company announced buying a business or stake — known before tomorrow's open
+  keptBuyValueToday: number // ₹ bought in today's bulk/block deals by buyers who didn't sell it the same day (keptBuyValues)
   inLeadingSector: boolean // Nifty 500 stock whose sector is in the top 2 by 1-month return
 }
 
@@ -100,7 +101,35 @@ export const SWING_RULES: { name: StrategyName; fires: (day: StockDay) => boolea
     fires: (day) => day.inLeadingSector && day.signal.isStage2Uptrend && day.signal.relativeStrengthRank >= 90,
     plan: (day) => swing("sector-leader", day),
   },
+  {
+    // Money flow: a buyer took ≥ ₹5 crore in a bulk/block deal and didn't sell it the same day
+    // (data/market-history/backtest/deals-report.md)
+    name: "bulk-deal-buy",
+    fires: (day) => day.keptBuyValueToday >= 5_00_00_000,
+    plan: (day) => swing("bulk-deal-buy", day),
+  },
 ]
+
+// One session's bulk and block deals → ₹ net bought per stock by buyers who didn't also sell it that day. Most bulk
+// deals are high-speed traders who buy and sell the same stock the same day; arbitrage desks are left out too.
+export function keptBuyValues(deals: { symbol: string; client: string; side: string; quantity: number; price: number }[]): Map<string, number> {
+  const net = new Map<string, number>()
+  const sold = new Set<string>()
+  for (const deal of deals) {
+    if (/arbitrage/i.test(deal.client)) continue
+    const key = `${deal.symbol}|${deal.client}`
+    const isBuy = /buy/i.test(deal.side)
+    net.set(key, (net.get(key) ?? 0) + (isBuy ? 1 : -1) * deal.quantity * deal.price)
+    if (!isBuy) sold.add(key)
+  }
+  const kept = new Map<string, number>()
+  for (const [key, value] of net) {
+    if (value <= 0 || sold.has(key)) continue
+    const symbol = key.split("|")[0]
+    kept.set(symbol, (kept.get(symbol) ?? 0) + value)
+  }
+  return kept
+}
 
 // Same-day trades: bought at the open, sold at the close (or at the stop, 0.5× the average daily range below the
 // fill). The rule must be known before the open, so it reads the signal day (the day before the trade).
@@ -118,7 +147,8 @@ export const INTRADAY_RULES: { name: StrategyName; fires: (day: StockDay) => boo
 // new-listing-breakout +0.27R, leader-pullback +0.18R, results-day +0.13R); in neutral and weak markets they lost
 // in the check period. Insider buys in a weak market looked good per trade (+0.24R, then +0.35R) but lost as one
 // account (−4.0% last year, worst drop −21%: repeat signals on the same stocks can't all be taken), so they aren't
-// traded either. One account, this table: +22.5% (Nov 2023 → Oct 2025), +28.5% last year, worst drop −19%.
+// traded either. bulk-deal-buy (strong +0.16R, then +0.30R) was added 19 Nov 2026. One account, this table: +46.3%
+// (Nov 2023 → Oct 2025), +38.2% last year, worst drop −17% (data/market-history/backtest/money-flow.md).
 // SME rules didn't pass and aren't traded. Intraday rules lost in every test and aren't traded. Overnight news
 // (acquisition-news, news-overnight.md) didn't pass in any market type and isn't traded.
 export type MarketType = "strong" | "neutral" | "weak"
@@ -129,6 +159,7 @@ export const LIVE_RISK_PERCENT: Record<string, Record<MarketType, number>> = {
   "stage2-tight": { strong: 1, neutral: 0, weak: 0 },
   "leader-pullback": { strong: 1, neutral: 0, weak: 0 },
   "sector-leader": { strong: 1, neutral: 0, weak: 0 },
+  "bulk-deal-buy": { strong: 1, neutral: 0, weak: 0 },
 }
 export const liveRiskPercent = (strategy: StrategyName, board: Board, marketType: MarketType) =>
   board === "main" ? LIVE_RISK_PERCENT[strategy]?.[marketType] ?? 0 : 0

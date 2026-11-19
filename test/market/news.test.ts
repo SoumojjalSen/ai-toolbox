@@ -41,3 +41,22 @@ test("morningReportBlock: the 8:30 report goes under the 9:09 check; a missing r
   assert.equal(morningReportBlock("# Pre-market briefing — Thursday\n\n> 🟢 **Do now**"), "---\n\n# Morning report (written 8:30)\n\n## Pre-market briefing — Thursday\n\n> 🟢 **Do now**")
   assert.equal(morningReportBlock(undefined), "> ⚠️ This morning's report wasn't written — the 8:30 run failed or is still running. The check above is complete on its own.")
 })
+
+
+test("keptBuyValues: ₹ bought in bulk/block deals by buyers who didn't sell that stock the same day", async () => {
+  const { keptBuyValues } = await import("../../src/services/market/strategies.js")
+  const deals = [
+    { symbol: "ACME", client: "GRAVITON RESEARCH CAPITAL LLP", side: "BUY", quantity: 100000, price: 500 }, // flips the same day
+    { symbol: "ACME", client: "GRAVITON RESEARCH CAPITAL LLP", side: "SELL", quantity: 100000, price: 501 },
+    { symbol: "ACME", client: "SBI MUTUAL FUND", side: "BUY", quantity: 200000, price: 500 }, // ₹10 cr, kept
+    { symbol: "ACME", client: "BNP PARIBAS ARBITRAGE", side: "BUY", quantity: 50000, price: 500 }, // arbitrage desk
+    { symbol: "BETA", client: "SELLER LLP", side: "SELL", quantity: 1000, price: 10 },
+  ]
+  assert.deepEqual([...keptBuyValues(deals)], [["ACME", 10_00_00_000]])
+})
+
+test("parseDealsCsv reads NSE's bulk/block deal CSV, numbers with Indian commas", async () => {
+  const { parseDealsCsv } = await import("../../src/services/market/rule-inputs.js")
+  const csv = `"Date ","Symbol ","Security Name ","Client Name ","Buy / Sell ","Quantity Traded ","Trade Price / Wght. Avg. Price ","Remarks "\n"01-NOV-2023","ADVANIHOTR","Advani Hotels & Resorts (","DELTA CORP LIMITED","SELL","2,50,000","110.52","-"\n`
+  assert.deepEqual(parseDealsCsv(csv, "bulk"), [{ kind: "bulk", date: "01-NOV-2023", symbol: "ADVANIHOTR", client: "DELTA CORP LIMITED", side: "SELL", quantity: 250000, price: 110.52 }])
+})

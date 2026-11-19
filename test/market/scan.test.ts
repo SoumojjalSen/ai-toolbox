@@ -65,7 +65,7 @@ test("RS rank orders stocks by volatility-adjusted momentum; a tight Stage 2 upt
 
 // a stock's day with no events: only price rules can fire
 function dayOf(signal: StockSignal, overrides: Partial<StockDay> = {}): StockDay {
-  return { bars: [], signal, board: "main", sessionsSinceListing: undefined, resultsFiledAfterLastClose: false, resultsFiledAfterTodaysClose: false, insiderBuyValueToday: 0, acquisitionFiledAfterTodaysClose: false, inLeadingSector: false, ...overrides }
+  return { bars: [], signal, board: "main", sessionsSinceListing: undefined, resultsFiledAfterLastClose: false, resultsFiledAfterTodaysClose: false, insiderBuyValueToday: 0, acquisitionFiledAfterTodaysClose: false, keptBuyValueToday: 0, inLeadingSector: false, ...overrides }
 }
 
 test("market type sets what is bought: rules buy only in a strong market; elsewhere they go on the watchlist", () => {
@@ -98,7 +98,7 @@ test("assessRegime: broad 4% up-moves with most stocks above the 50-day = strong
 
 test("formatRegime says what today's market type allows, from the live size table", () => {
   const regime = (label: Regime["label"]): Regime => ({ label, percentAbove50: 50, percentAbove200: 50, upMoves5d: 10, downMoves5d: 10 })
-  assert.match(formatRegime(regime("strong"), ""), /STRONG → BUY: results-day at 1% of capital per trade, insider-buy at 1% .*sector-leader at 1% of capital per trade\n/)
+  assert.match(formatRegime(regime("strong"), ""), /STRONG → BUY: results-day at 1% of capital per trade, insider-buy at 1% .*sector-leader at 1% of capital per trade, bulk-deal-buy at 1% of capital per trade\n/)
   assert.match(formatRegime(regime("weak"), ""), /WEAK → NO NEW SWING BUYS/)
   assert.match(formatRegime(regime("neutral"), ""), /NEUTRAL → NO NEW SWING BUYS/)
 })
