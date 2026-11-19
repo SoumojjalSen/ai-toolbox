@@ -65,7 +65,7 @@ test("RS rank orders stocks by volatility-adjusted momentum; a tight Stage 2 upt
 
 // a stock's day with no events: only price rules can fire
 function dayOf(signal: StockSignal, overrides: Partial<StockDay> = {}): StockDay {
-  return { bars: [], signal, board: "main", sessionsSinceListing: undefined, resultsFiledAfterLastClose: false, resultsFiledAfterTodaysClose: false, insiderBuyValueToday: 0, inLeadingSector: false, ...overrides }
+  return { bars: [], signal, board: "main", sessionsSinceListing: undefined, resultsFiledAfterLastClose: false, resultsFiledAfterTodaysClose: false, insiderBuyValueToday: 0, acquisitionFiledAfterTodaysClose: false, inLeadingSector: false, ...overrides }
 }
 
 test("market type sets what is bought: rules buy only in a strong market; elsewhere they go on the watchlist", () => {

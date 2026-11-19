@@ -21,7 +21,7 @@ export type TradeResult = ClosedTrade | SkippedTrade | OpenTrade
 
 export const BUY_LIMIT_PERCENT = 1
 
-export function simulateTrade(bars: DailyPriceRow[], signalIndex: number, plan: TradePlan, roundTripCostPercent: number, useBuyLimit = true): TradeResult {
+export function simulateTrade(bars: DailyPriceRow[], signalIndex: number, plan: TradePlan, roundTripCostPercent: number, useBuyLimit = !plan.buyAtAnyOpen): TradeResult {
   const fillIndex = signalIndex + 1
   const fill = bars[fillIndex]
   if (!fill) return { kind: "skipped", reason: "no next session" }

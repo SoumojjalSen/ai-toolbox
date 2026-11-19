@@ -22,6 +22,7 @@ export interface History {
   closeTimes: number[] // epoch ms of each session's 15:30 IST close
   stocks: Map<string, StockHistory>
   resultsFiledAt: Map<string, number[]> // symbol → epoch ms
+  acquisitionsFiledAt: Map<string, number[]> // symbol → epoch ms of each acquisition filing (lenses.ts classifier)
   insiderBuys: Map<string, Map<number, number>> // symbol → day index → ₹ bought (promoters, directors, KMP; market purchases)
   sectorOf: Map<string, string> // Nifty 500 only (today's list)
 }
@@ -87,6 +88,11 @@ export async function loadHistory(): Promise<History> {
     resultsFiledAt.set(filing.symbol, [...(resultsFiledAt.get(filing.symbol) ?? []), parseNseTimestamp(filing.filedAt)])
   }
 
+  const acquisitionsFiledAt = new Map<string, number[]>()
+  for (const filing of JSON.parse(await readGz("filings.json.gz")) as { symbol: string; filedAt: string; kind: string }[]) {
+    if (filing.kind === "acquisition") acquisitionsFiledAt.set(filing.symbol, [...(acquisitionsFiledAt.get(filing.symbol) ?? []), parseNseTimestamp(filing.filedAt)])
+  }
+
   const dayOf = new Map(days.map((day, index) => [day, index]))
   const insiderBuys = new Map<string, Map<number, number>>()
   for (const trade of JSON.parse(await readGz("insider-trades.json.gz")) as { symbol: string; personCategory: string; acqMode: string; type: string; secType: string; value: number; disclosed: string }[]) {
@@ -105,5 +111,5 @@ export async function loadHistory(): Promise<History> {
     const fields = line.split(",").map((field) => field.trim())
     if (fields[2]) sectorOf.set(fields[2], fields[1])
   }
-  return { days, closeTimes, stocks, resultsFiledAt, insiderBuys, sectorOf }
+  return { days, closeTimes, stocks, resultsFiledAt, acquisitionsFiledAt, insiderBuys, sectorOf }
 }

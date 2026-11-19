@@ -5,6 +5,8 @@
 //   corporate-actions.json.gz       splits and bonuses (symbol, exDate, factor) — prices are adjusted with these
 //   insider-trades.json.gz          SEBI PIT disclosures: promoter / director buys and sells
 //   results-filings.json.gz         when each company filed its quarterly results (from NSE announcements)
+//   filings.json.gz                 every material company filing (acquisition, order, fund raise…), typed by the live
+//                                   classifier (lenses.ts) — the overnight-news rule's input
 //   listings.json.gz                listing date and issue price of every IPO NSE lists (main board and SME)
 //   equity-list.csv.gz, nifty500.csv.gz   listing dates of all main-board stocks; sectors of the Nifty 500
 import { mkdir, readFile, writeFile, readdir } from "fs/promises"
@@ -14,6 +16,7 @@ import { gzipSync, gunzipSync } from "zlib"
 import { fetchNse } from "../services/market/nse.js"
 import { toAdjustments } from "../services/market/adjust.js"
 import { parseNseDate } from "../services/market/store.js"
+import { classifyAnnouncement } from "../services/market/lenses.js"
 
 export const HISTORY_DIR = join(process.cwd(), "data", "market-history")
 const API = "https://www.nseindia.com/api/"
@@ -95,10 +98,17 @@ async function downloadEvents(from: Date, to: Date) {
   await writeGz("insider-trades.json.gz", JSON.stringify(insider.map(({ symbol, personCategory, acqMode, tdpTransactionType, secType, secAcq, secVal, acqfromDt, acqtoDt, intimDt, date }) =>
     ({ symbol, personCategory, acqMode, type: tdpTransactionType, secType, shares: Number(secAcq) || 0, value: Number(secVal) || 0, tradeFrom: acqfromDt, tradeTo: acqtoDt, disclosed: date || intimDt }))))
 
-  // one day per call: a results-season day has ~1,500 announcements
-  const results = await fetchInChunks("results filings", from, to, 1, (a, b) => `corporate-announcements?index=equities&from_date=${a}&to_date=${b}`,
-    (body) => (body as Announcement[]).filter((row) => RESULTS_TEXT.test(row.attchmntText ?? "")).map((row) => ({ symbol: row.symbol, filedAt: row.an_dt })), 5)
-  await writeGz("results-filings.json.gz", JSON.stringify(results))
+  await downloadAnnouncements(from, to)
+}
+
+// One day per call: a results-season day has ~1,500 announcements. Writes the results times and the typed filings.
+export async function downloadAnnouncements(from: Date, to: Date) {
+  const announcements = await fetchInChunks("announcements", from, to, 1, (a, b) => `corporate-announcements?index=equities&from_date=${a}&to_date=${b}`, (body) => body as Announcement[], 5)
+  await writeGz("results-filings.json.gz", JSON.stringify(announcements.filter((row) => RESULTS_TEXT.test(row.attchmntText ?? "")).map((row) => ({ symbol: row.symbol, filedAt: row.an_dt }))))
+  await writeGz("filings.json.gz", JSON.stringify(announcements.flatMap((row) => {
+    const kind = classifyAnnouncement({ desc: row.desc, attchmntText: row.attchmntText ?? undefined })
+    return kind ? [{ symbol: row.symbol, filedAt: row.an_dt, kind, headline: (row.attchmntText ?? row.desc).replace(/\s+/g, " ").slice(0, 200) }] : []
+  })))
 }
 
 async function downloadLists() {

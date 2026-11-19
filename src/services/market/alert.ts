@@ -1,9 +1,10 @@
 import { fetchNse, fetchNseJson } from "./nse.js"
-import { fetchMarketLenses, type EventKind } from "./lenses.js"
+import { fetchMarketLenses, type CompanyEvent, type EventKind } from "./lenses.js"
 import { readHoldings } from "./holdings.js"
 import { buildIpoClosingToday, fetchHolidays } from "./ipo.js"
 import { readJson, writeJson, todayIst, nseDate, parseNseDate } from "./store.js"
 import { findOpenTrades, tradeStatus, buyLimit, type ReportPick } from "./scorecard.js"
+import type { ScanFlags } from "./scan.js"
 import { convertMarkdownToEmailHtml, markdownTable as table, tableCell } from "../../formats.js"
 
 // Market check at ~9:09 (pre-open) and 14:00 — code only, no AI. At 9:09 the pre-open auction has fixed each
@@ -77,13 +78,39 @@ async function fetchPreOpenMarket() {
   const isTradingDay = isTradingDayIst(new Date(), holidays)
   if (isTradingDay && rows.length) await writeJson(`preopen/${todayIst()}.json`, preOpenSnapshot(rows))
   return {
-    quotes, isTradingDay, nifty: undefined,
+    quotes, isTradingDay, nifty: undefined, holidays,
     risingSinceOpen: [...quotes.values()].filter((quote) => quote.changePercent > 0).length,
     fallingSinceOpen: [...quotes.values()].filter((quote) => quote.changePercent < 0).length,
   }
 }
 
 const BAD_NEWS: EventKind[] = ["regulatory", "management exit"]
+
+// 15:30 IST of the last trading day before `now` — filings after it are news the market hasn't traded yet
+export function previousSessionClose(now: Date, holidays: Set<string>): number {
+  for (let back = 1; ; back++) {
+    const day = new Date(now.getTime() - back * 86_400_000)
+    if (isTradingDayIst(day, holidays)) return parseNseDate(nseDate(day)) + 15.5 * 3_600_000 // midnight IST + 15:30
+  }
+}
+
+export interface OvernightNews { symbol: string; kinds: EventKind[]; headline: string; link: string; gapPercent: number }
+
+// Company filings made since the last close on stocks the scan covers (liquid enough to trade), with the pre-open
+// gap — how the market is pricing the news before 9:15. LT Foods' acquisition (filed 17:25, opened +3.2%, closed +9%)
+// was in the 8:00 report's input on 19 Nov 2026 but not in the report; this list is code, so nothing is dropped.
+export function overnightNews(events: CompanyEvent[], quotes: Map<string, LiveQuote>, scanned: Set<string>, sinceMs: number): OvernightNews[] {
+  const bySymbol = new Map<string, CompanyEvent[]>()
+  for (const event of events) {
+    if (event.kind === "results date" || !scanned.has(event.symbol) || !quotes.has(event.symbol)) continue
+    if (new Date(`${event.time.replace(/-/g, " ")} GMT+0530`).getTime() <= sinceMs) continue // "18-Nov-2026 17:25:43", IST
+    bySymbol.set(event.symbol, [...(bySymbol.get(event.symbol) ?? []), event])
+  }
+  return [...bySymbol].map(([symbol, filings]) => ({
+    symbol, kinds: [...new Set(filings.map((filing) => filing.kind))], headline: filings[0].headline, link: filings[0].link,
+    gapPercent: quotes.get(symbol)!.changePercent,
+  })).sort((a, b) => b.gapPercent - a.gapPercent)
+}
 
 // A headline explains a move only if it's about this company: it names the company, isn't a list of stocks
 // ("Buzzing stocks: …, SML Mahindra, Just Dial …", "Buy, sell or hold: TCS, Tata Motors PV …" — any "stocks" headline), doesn't just
@@ -178,6 +205,17 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
         `| ${decision.startsWith("✅") ? "🟢" : "🔴"} **${pick.symbol}** ${chart(pick.symbol)} | ${quote ? `₹${quote.price} (${sign(quote.changePercent)})` : "—"} | ₹${pick.entry} · SL ₹${pick.stopLoss} | ${decision} |`)))
   }
 
+  // 1b. company filings since the last close on liquid stocks, with the pre-open gap — listed by code, so none is
+  // dropped. Information, not buys: bought at the open, overnight news lost money on average in both test periods,
+  // acquisitions included (data/market-history/backtest/news-overnight.md).
+  const flags = await readJson<ScanFlags>(`scan-flags/${todayIst()}.json`)
+  const news = isPreOpen && "holidays" in live && live.holidays instanceof Set ? overnightNews(lenses.events, live.quotes, new Set(flags?.scanned ?? []), previousSessionClose(new Date(), live.holidays)) : []
+  if (news.length) {
+    blocks.push(table(`## Overnight company news (filed since the last close) — ${news.length}`, "| Stock | Pre-open | Filing | What to do |",
+      news.map((row) => `| **${row.symbol}** ${chart(row.symbol)} | ${sign(row.gapPercent)} | ${row.kinds.join(", ")}: ${tableCell(row.headline.replace(/\s+/g, " ").slice(0, 110))}${row.link ? ` [NSE](${row.link})` : ""} | ${
+        reportPicks.some((pick) => pick.symbol === row.symbol) ? "see Today's picks" : row.kinds.some((kind) => BAD_NEWS.includes(kind)) ? "🔴 bad news — if you hold it, review" : "information — not a buy (backtest: buying overnight news at the open lost on average)"} |`)))
+  }
+
   // 2. trades you hold from earlier picks — stop, target, sell-by
   const today = parseNseDate(nseDate())
   const openTrades = (await findOpenTrades(holdings.symbols)).filter((trade) => live.quotes.has(trade.symbol))
@@ -233,6 +271,6 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
   ].join("\n\n")
 
   const count = 1 + reportPicks.length + openTrades.length + holdingRows.length + ipo.calls.length // ≥1: sent on every trading day
-  const subjectParts = [reportPicks.length ? "picks: buy or skip" : "", ipo.calls.length ? "IPOs closing today" : "", holdingRows.length ? `${holdingRows.length} holdings moving` : "", doNow.length ? "" : "nothing to do"].filter(Boolean)
+  const subjectParts = [reportPicks.length ? "picks: buy or skip" : "", news.length ? `${news.length} overnight filings` : "", ipo.calls.length ? "IPOs closing today" : "", holdingRows.length ? `${holdingRows.length} holdings moving` : "", doNow.length ? "" : "nothing to do"].filter(Boolean)
   return { count, subject: `📈 Market check ${timeIst} — ${subjectParts.join(", ")}`, html: convertMarkdownToEmailHtml(markdown) }
 }

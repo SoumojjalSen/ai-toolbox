@@ -254,6 +254,7 @@ export function rankSwingSetups(days: StockDay[], marketType: MarketType): Trade
 // Today's inputs for the pick rules, one per scanned stock — the live twin of the backtest's day loop (run.ts)
 export function buildStockDays(sessions: DailyPriceRow[][], sessionDates: string[], stockSignals: StockSignal[], inputs: {
   listedOn: Map<string, number>; sectorOf: Map<string, string>; insiderBuyValue: (symbol: string, sessionDate: string) => number; resultsFiledAt: Map<string, string>
+  acquisitionsFiledAt: Map<string, string[]> // symbol → NSE filing times of acquisition filings
 }): StockDay[] {
   const historyBySymbol = new Map<string, DailyPriceRow[]>()
   for (const session of sessions) for (const row of session) historyBySymbol.set(row.symbol, [...(historyBySymbol.get(row.symbol) ?? []), row])
@@ -273,6 +274,7 @@ export function buildStockDays(sessions: DailyPriceRow[][], sessionDates: string
       resultsFiledAfterLastClose: filedTime !== undefined && filedTime > previousClose && filedTime <= lastClose,
       resultsFiledAfterTodaysClose: filedTime !== undefined && filedTime > lastClose,
       insiderBuyValueToday: inputs.insiderBuyValue(signal.symbol, sessionDates[sessionDates.length - 1]),
+      acquisitionFiledAfterTodaysClose: (inputs.acquisitionsFiledAt.get(signal.symbol) ?? []).some((time) => parseNseTimestamp(time) > lastClose),
       inLeadingSector: sectors.has(inputs.sectorOf.get(signal.symbol) ?? ""),
     }
   })
@@ -479,7 +481,7 @@ async function fetchMarketContext(etfSymbols: Set<string>): Promise<{ text: stri
 }
 
 // Only these raise a setup's rank; results/press release/rating/fund raise are shown but can cut either way
-const POSITIVE_EVENTS = new Set<EventKind>(["order", "corporate action", "expansion"])
+const POSITIVE_EVENTS = new Set<EventKind>(["order", "acquisition", "corporate action", "expansion"])
 const INFO_EVENTS = new Set<EventKind>(["results", "rating change", "fund raise", "press release", "price-move query"])
 const NEGATIVE_EVENTS = new Set<EventKind>(["regulatory", "management exit"])
 const SETUP_LIMITS = { buy: 40, watch: 20 }
@@ -546,7 +548,7 @@ function formatSwingSetups(ranked: RankedSetup[]): string {
 
 function formatLensSections(lenses: MarketLenses, signalsBySymbol: Map<string, StockSignal>, holdingSymbols: Set<string>, excluded: Map<string, string>): string {
   const relevant = (symbol: string) => signalsBySymbol.has(symbol) || holdingSymbols.has(symbol)
-  const kindOrder: EventKind[] = ["regulatory", "management exit", "corporate action", "results", "order", "rating change", "fund raise", "expansion", "price-move query", "press release"]
+  const kindOrder: EventKind[] = ["regulatory", "management exit", "acquisition", "corporate action", "results", "order", "rating change", "fund raise", "expansion", "price-move query", "press release"]
   const events = lenses.events
     .filter((event) => relevant(event.symbol))
     .sort((a, b) => kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind))
@@ -694,7 +696,9 @@ export async function buildMarketScan(holdingSymbols: Set<string> = new Set()): 
   const excluded = new Map<string, string>()
   const ruleInputs = await fetchRuleInputs()
   const regime = assessRegime(stockSignals, sessions)
-  const stockDays = buildStockDays(sessions, sessionDates, stockSignals, { ...ruleInputs, resultsFiledAt: lenses.resultsLastWeek })
+  const acquisitionsFiledAt = new Map<string, string[]>()
+  for (const event of lenses.events) if (event.kind === "acquisition") acquisitionsFiledAt.set(event.symbol, [...(acquisitionsFiledAt.get(event.symbol) ?? []), event.time])
+  const stockDays = buildStockDays(sessions, sessionDates, stockSignals, { ...ruleInputs, resultsFiledAt: lenses.resultsLastWeek, acquisitionsFiledAt })
   const setups = rankSwingSetups(stockDays, regime.label).filter((setup) => {
     const veto = lenses.vetoes.get(setup.symbol)
     if (veto) excluded.set(setup.symbol, veto)

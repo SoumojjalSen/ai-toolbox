@@ -7,7 +7,7 @@ import { nseDate } from "./store.js"
 
 export type EventKind =
   | "regulatory" | "management exit" | "corporate action" | "results" | "order" | "rating change" | "fund raise"
-  | "expansion" | "price-move query" | "press release" | "governance" | "pledge" | "results date"
+  | "expansion" | "price-move query" | "press release" | "governance" | "pledge" | "results date" | "acquisition"
 
 export interface CompanyEvent {
   symbol: string
@@ -68,13 +68,19 @@ const IGNORED_CATEGORIES = /allotment of securities|esop|esos|certificate under|
 
 interface NseAnnouncement { symbol: string; desc: string; attchmntText?: string; an_dt: string; attchmntFile?: string }
 
+// The company buying a business or a stake. Selling one, merging or demerging stays "corporate action" — those lost
+// money bought at the next open, while acquisitions in a weak market paid in both test periods (news-overnight.md).
+const ACQUISITION = /acquisition|acquir(e|es|ed|ing)\b/i
+const NOT_A_PURCHASE = /sale or disposal|divest|disinvest|stake sale|sell|amalgamation|merger|demerger|scheme of arrangement|open offer|takeover/i
+
 export function classifyAnnouncement(announcement: Pick<NseAnnouncement, "desc" | "attchmntText">): EventKind | undefined {
   if (IGNORED_CATEGORIES.test(announcement.desc)) return undefined
   const byCategory = CATEGORY_RULES.find(([, pattern]) => pattern.test(announcement.desc))?.[0]
-  if (byCategory) return byCategory
   const byText = TEXT_RULES.find(([, pattern]) => pattern.test(announcement.attchmntText ?? ""))?.[0]
   // a press release's text is usually just "regarding a press release" — the PDF holds the news
-  return byText ?? (/press release/i.test(announcement.desc) ? "press release" : undefined)
+  const kind = byCategory ?? byText ?? (/press release/i.test(announcement.desc) ? "press release" : undefined)
+  const text = `${announcement.desc} ${announcement.attchmntText ?? ""}`
+  return (kind === "corporate action" || kind === "press release") && ACQUISITION.test(text) && !NOT_A_PURCHASE.test(text) ? "acquisition" : kind
 }
 
 function formatNseDate(date: Date): string {

@@ -74,6 +74,7 @@ function backtest(history: History): { trades: TradeRecord[]; state: ScanState; 
         resultsFiledAfterLastClose: day > 0 && filings.some((time) => time > closeTimes[day - 1] && time <= closeTimes[day]),
         resultsFiledAfterTodaysClose: filings.some((time) => time > closeTimes[day] && time < nextOpenTime),
         insiderBuyValueToday: history.insiderBuys.get(stock.symbol)?.get(day) ?? 0,
+        acquisitionFiledAfterTodaysClose: (history.acquisitionsFiledAt.get(stock.symbol) ?? []).some((time) => time > closeTimes[day] && time < nextOpenTime),
         inLeadingSector: sectorsLeading.has(history.sectorOf.get(stock.symbol) ?? ""),
       }
       const record = (strategy: StrategyName, result: TradeResult) => {

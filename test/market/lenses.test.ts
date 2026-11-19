@@ -22,6 +22,12 @@ test("classifyAnnouncement tags market-moving filings and ignores routine ones",
     ["General Updates", "Letter of Offer for Right Issue.", "fund raise"],
     ["Updates", "Revised finacial result after removing typographical error as observed by NSE", "governance"],
     ["Certificate under SEBI (Depositories and Participants) Regulations, 2018", "Certificate for the quarter", undefined],
+    // buying a business is its own type — the one overnight filing that paid in a weak market (news-overnight.md)
+    ["General Updates", "LT Foods Limited- Intimation under Regulation 30 regarding execution of Stock Purchase Agreement for acquisition of 100% equity share capital of MK Foods Holdings, Inc.", "acquisition"],
+    ["Press Release", "LT Foods Limited has informed the Exchange regarding a press release dated November 18, 2026, titled \"Please find enclosed herewith copy of Press Release on LT Foods further strengthens U.S. food portfolio with acquisition of the brand Maya Kaimal\"", "acquisition"],
+    ["Acquisition", "Acquisition of 51% stake in XYZ Pvt Ltd", "acquisition"],
+    ["Sale or disposal-XBRL", "Sale or disposal of the unit to ABC Ltd", "corporate action"],
+    ["Updates", "Company has completed the divestment of its stake in XYZ, which it acquired in 2019", "corporate action"],
   ]
   for (const [desc, attchmntText, expected] of cases) assert.equal(classifyAnnouncement({ desc, attchmntText }), expected, attchmntText)
 })

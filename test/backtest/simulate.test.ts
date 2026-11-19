@@ -8,6 +8,12 @@ const bar = (open: number, high: number, low: number, close: number, prevClose =
   ({ symbol: "ACME", prevClose, open, high, low, close, volume: 1000, turnoverLakhs: 100, deliveryPercent: 50 })
 const swing: TradePlan = { strategy: "stage2-tight", risk: 10, reward: 3, holdSessions: 30 }
 
+test("a news rule buys the open whatever the gap; levels are set from that open", () => {
+  const bars = [bar(100, 101, 99, 100), bar(104, 110, 103, 109), bar(109, 135, 108, 134)]
+  assert.deepEqual(simulateTrade(bars, 0, { ...swing, strategy: "acquisition-news", buyAtAnyOpen: true }, 0),
+    { kind: "closed", entryIndex: 1, exitIndex: 2, entry: 104, exit: 134, outcome: "target", r: 3 })
+})
+
 test("bought at the next open, sold at the target: +3R minus costs", () => {
   const bars = [bar(100, 101, 99, 100), bar(100, 105, 99, 104), bar(104, 131, 103, 129)]
   assert.deepEqual(simulateTrade(bars, 0, swing, 0.25), { kind: "closed", entryIndex: 1, exitIndex: 2, entry: 100, exit: 130, outcome: "target", r: 3 - 0.025 })

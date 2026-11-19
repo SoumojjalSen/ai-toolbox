@@ -8,6 +8,7 @@ export type Board = "main" | "sme"
 export type StrategyName =
   | "stage2-tight" | "leader-pullback" | "new-listing-breakout" | "results-day" | "insider-buy" | "sector-leader"
   | "intraday-results-gap" | "intraday-accumulation" | "intraday-stage2"
+  | "acquisition-news"
 
 export interface StockDay {
   bars: DailyPriceRow[] // history ending today, adjusted for splits/bonuses (up to ~220 sessions)
@@ -17,6 +18,7 @@ export interface StockDay {
   resultsFiledAfterLastClose: boolean // results filed after yesterday's close and before today's close
   resultsFiledAfterTodaysClose: boolean // known before tomorrow's open
   insiderBuyValueToday: number // ₹ of promoter/director market purchases disclosed today
+  acquisitionFiledAfterTodaysClose: boolean // the company announced buying a business or stake — known before tomorrow's open
   inLeadingSector: boolean // Nifty 500 stock whose sector is in the top 2 by 1-month return
 }
 
@@ -25,6 +27,7 @@ export interface TradePlan {
   risk: number // ₹ per share between fill and stop
   reward: number // target = fill + reward × risk
   holdSessions: number // sell at the close of this session if neither level is hit; 0 = sell at today's close (intraday)
+  buyAtAnyOpen?: true // news rules: bought at the open whatever the gap (levels set from the 9:09 pre-open price); others skip an open > 1% above the close
 }
 
 const SWING_STOP_ATR = 2
@@ -32,8 +35,11 @@ const INTRADAY_STOP_ATR = 0.5
 
 const previous = (day: StockDay) => day.bars[day.bars.length - 2]
 
+// News rules buy the open whatever the gap — the news is why it gaps; the others skip an open > 1% above the close
+export const BUYS_AT_ANY_OPEN = new Set<string>(["acquisition-news"])
+
 function swing(strategy: StrategyName, day: StockDay, holdSessions = 30): TradePlan {
-  return { strategy, risk: SWING_STOP_ATR * day.signal.averageDailyRange, reward: 3, holdSessions }
+  return { strategy, risk: SWING_STOP_ATR * day.signal.averageDailyRange, reward: 3, holdSessions, ...(BUYS_AT_ANY_OPEN.has(strategy) ? { buyAtAnyOpen: true as const } : {}) }
 }
 
 // Each rule: the plain-words condition, then the code. Order = priority when several fire on one stock.
@@ -49,6 +55,15 @@ export const SWING_RULES: { name: StrategyName; fires: (day: StockDay) => boolea
     name: "insider-buy",
     fires: (day) => day.insiderBuyValueToday >= 50_00_000,
     plan: (day) => swing("insider-buy", day, 60),
+  },
+  {
+    // The company announced an acquisition after the close: bought at the next open whatever the gap. Not traded in
+    // any market type: +0.04R/+0.05R a trade in a strong market, about 0 in a weak one, a loss in a neutral one; overnight
+    // news of every type lost money bought at the open (data/market-history/backtest/news-overnight.md). It fires
+    // for the watchlist and keeps the test re-run with every backtest.
+    name: "acquisition-news",
+    fires: (day) => day.acquisitionFiledAfterTodaysClose,
+    plan: (day) => swing("acquisition-news", day),
   },
   {
     // Listed under a year ago: a new closing high since listing, on more volume than usual after the listing days
@@ -104,7 +119,8 @@ export const INTRADAY_RULES: { name: StrategyName; fires: (day: StockDay) => boo
 // in the check period. Insider buys in a weak market looked good per trade (+0.24R, then +0.35R) but lost as one
 // account (−4.0% last year, worst drop −21%: repeat signals on the same stocks can't all be taken), so they aren't
 // traded either. One account, this table: +22.5% (Nov 2023 → Oct 2025), +28.5% last year, worst drop −19%.
-// SME rules didn't pass and aren't traded. Intraday rules lost in every test and aren't traded.
+// SME rules didn't pass and aren't traded. Intraday rules lost in every test and aren't traded. Overnight news
+// (acquisition-news, news-overnight.md) didn't pass in any market type and isn't traded.
 export type MarketType = "strong" | "neutral" | "weak"
 export const LIVE_RISK_PERCENT: Record<string, Record<MarketType, number>> = {
   "results-day": { strong: 1, neutral: 0, weak: 0 },
@@ -130,6 +146,18 @@ export function leadingSectors(stocks: { sector: string | undefined; changePerce
     .map(([sector, values]) => [sector, values.reduce((a, b) => a + b, 0) / values.length] as const)
     .sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sector]) => sector))
 }
+
+// Overnight news: a material filing made after the close, bought at the next open (the 9:09 pre-open price). The gap
+// is how far that open is above the last close — the market's first verdict on the news.
+export const NEWS_HOLD_SESSIONS = 30
+export const GAP_BUCKETS: { label: string; below: number }[] = [
+  { label: "below 0%", below: 0 },
+  { label: "0–2%", below: 2 },
+  { label: "2–5%", below: 5 },
+  { label: "5–10%", below: 10 },
+  { label: "10%+", below: Infinity },
+]
+export const gapBucket = (gapPercent: number) => GAP_BUCKETS.find((bucket) => gapPercent < bucket.below)!.label
 
 export function intradayPlan(strategy: StrategyName, day: StockDay): TradePlan {
   return { strategy, risk: INTRADAY_STOP_ATR * day.signal.averageDailyRange, reward: Infinity, holdSessions: 0 }
