@@ -77,6 +77,29 @@ export function judgeOpen(markdown: string, niftyOpenChange: number | undefined)
   return { expected, result: `opened ${actual} (${sign(niftyOpenChange)})`, correct: said === actual }
 }
 
+// ---------- the 9:09 overnight-news list, bought at the open ----------
+
+// Each stock the 9:09 email listed for a filing since the last close (saved to overnight-news/), as if bought at the
+// open: the gap it had already made and what was left by the close. undefined = nothing was listed.
+export function overnightNewsCheck(listed: { symbol: string; kinds: string[] }[], bars: Map<string, DailyPriceRow>): string | undefined {
+  const rows = listed.flatMap((item) => {
+    const bar = bars.get(item.symbol)
+    return bar && bar.prevClose > 0 && bar.open > 0
+      ? [{ ...item, gap: (bar.open / bar.prevClose - 1) * 100, high: (bar.high / bar.prevClose - 1) * 100, openToClose: (bar.close / bar.open - 1) * 100 }] : []
+  }).sort((a, b) => b.openToClose - a.openToClose)
+  if (!rows.length) return undefined
+  const average = rows.reduce((total, row) => total + row.openToClose, 0) / rows.length
+  return [
+    "## Overnight news — bought at the open, how did it go?",
+    "",
+    `**${rows.length} stocks bought at the 9:15 open: ${sign(average)} on average by the close · ${rows.filter((row) => row.openToClose > 0).length} rose, ${rows.filter((row) => row.openToClose < 0).length} fell.** The move before 9:15 (the gap) can't be bought.`,
+    "",
+    "| Stock | Filing | Gap at the open | High of the day | Open → close |",
+    "|---|---|---|---|---|",
+    ...rows.map((row) => `| ${row.symbol} | ${row.kinds.join(", ")} | ${sign(row.gap)} | ${sign(row.high)} | ${sign(row.openToClose)} |`),
+  ].join("\n")
+}
+
 // ---------- every riser of the day, by what the system said that morning ----------
 
 export interface Riser { symbol: string; series: string; change: number; group: string }

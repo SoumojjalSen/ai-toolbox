@@ -180,6 +180,37 @@ const chart = (symbol: string) => `[chart](https://www.tradingview.com/chart/?sy
 
 export interface MarketEmail { count: number; subject: string; html: string }
 
+// The overnight filings in sections — a one-line note, then bad news (and Do now when you hold the stock), good news
+// (orders, acquisitions, new capacity), and the rest. Every stock here already moved before 9:15. 23 Nov 2026: bought
+// at the open, the 54 listed averaged −1.1% by the close (39 fell); the 6 that gapped up ≥ 2% averaged −2.2%.
+const GOOD_NEWS: EventKind[] = ["order", "acquisition", "expansion"]
+export function overnightNewsBlocks(news: OvernightNews[], pickSymbols: Set<string>, heldSymbols: Set<string>): { blocks: string[]; doNow: string[] } {
+  const isBad = (row: OvernightNews) => row.kinds.some((kind) => BAD_NEWS.includes(kind))
+  const isGood = (row: OvernightNews) => !isBad(row) && row.kinds.some((kind) => GOOD_NEWS.includes(kind))
+  const filing = (row: OvernightNews) => `${row.kinds.join(", ")}: ${tableCell(row.headline.replace(/\s+/g, " ").slice(0, 110))}${row.link ? ` [NSE](${row.link})` : ""}`
+  const stock = (row: OvernightNews) => `**${row.symbol}** ${chart(row.symbol)}${pickSymbols.has(row.symbol) ? " (today's pick)" : ""}`
+  const bad = news.filter(isBad)
+  const good = news.filter(isGood)
+  const other = news.filter((row) => !isBad(row) && !isGood(row))
+  const blocks = [`## Overnight company news — ${news.length} filings since the last close\n\nEvery stock below **already moved before 9:15**: "Opens" is the gap the pre-open auction has priced in. None is a buy on the news alone — bought at the open, overnight news fell from the open on average (3-year backtest; checked every evening).`]
+  if (bad.length) {
+    blocks.push(table(`## 🔴 Bad news — avoid (${bad.length})`, "| Stock | Opens | Filing | You |",
+      bad.map((row) => `| 🔴 ${stock(row)} | ${sign(row.gapPercent)} | ${filing(row)} | ${heldSymbols.has(row.symbol) ? "you hold it — review" : "don't buy"} |`)))
+  }
+  if (good.length) {
+    blocks.push(table(`## 🟢 Good news — orders, acquisitions, new capacity (${good.length})`, "| Stock | Opens | Filing |",
+      good.map((row) => `| 🟢 ${stock(row)} | ${sign(row.gapPercent)} | ${filing(row)} |`)))
+  }
+  if (other.length) {
+    blocks.push(table(`## Other filings — read before acting (${other.length})`, "| Stock | Opens | Filing |",
+      other.map((row) => `| ${stock(row)} | ${sign(row.gapPercent)} | ${filing(row)} |`)))
+  }
+  return {
+    blocks,
+    doNow: bad.filter((row) => heldSymbols.has(row.symbol)).map((row) => `**${row.symbol}** (you hold it): bad news filed since the last close (${row.kinds.filter((kind) => BAD_NEWS.includes(kind)).join(", ")}) — review before 9:15`),
+  }
+}
+
 // One morning email: the report (written by the 8:30 run, not emailed on its own) goes under the 9:09 check, its
 // title demoted one level so the check's title leads
 export function morningReportBlock(report: string | undefined): string {
@@ -218,9 +249,10 @@ export async function buildMarketCheck(): Promise<MarketEmail> {
   const flags = await readJson<ScanFlags>(`scan-flags/${todayIst()}.json`)
   const news = isPreOpen && "holidays" in live && live.holidays instanceof Set ? overnightNews(lenses.events, live.quotes, new Set(flags?.scanned ?? []), previousSessionClose(new Date(), live.holidays)) : []
   if (news.length) {
-    blocks.push(table(`## Overnight company news (filed since the last close) — ${news.length}`, "| Stock | Pre-open | Filing | What to do |",
-      news.map((row) => `| **${row.symbol}** ${chart(row.symbol)} | ${sign(row.gapPercent)} | ${row.kinds.join(", ")}: ${tableCell(row.headline.replace(/\s+/g, " ").slice(0, 110))}${row.link ? ` [NSE](${row.link})` : ""} | ${
-        reportPicks.some((pick) => pick.symbol === row.symbol) ? "see Today's picks" : row.kinds.some((kind) => BAD_NEWS.includes(kind)) ? "🔴 bad news — if you hold it, review" : "information — not a buy (backtest: buying overnight news at the open lost on average)"} |`)))
+    const newsBlocks = overnightNewsBlocks(news, new Set(reportPicks.map((pick) => pick.symbol)), holdings.symbols)
+    blocks.push(...newsBlocks.blocks)
+    doNow.push(...newsBlocks.doNow)
+    await writeJson(`overnight-news/${todayIst()}.json`, news.map(({ symbol, kinds }) => ({ symbol, kinds }))) // the evening check scores them
   }
 
   // 2. trades you hold from earlier picks — stop, target, sell-by

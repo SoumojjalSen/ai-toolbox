@@ -60,3 +60,36 @@ test("parseDealsCsv reads NSE's bulk/block deal CSV, numbers with Indian commas"
   const csv = `"Date ","Symbol ","Security Name ","Client Name ","Buy / Sell ","Quantity Traded ","Trade Price / Wght. Avg. Price ","Remarks "\n"01-NOV-2023","ADVANIHOTR","Advani Hotels & Resorts (","DELTA CORP LIMITED","SELL","2,50,000","110.52","-"\n`
   assert.deepEqual(parseDealsCsv(csv, "bulk"), [{ kind: "bulk", date: "01-NOV-2023", symbol: "ADVANIHOTR", client: "DELTA CORP LIMITED", side: "SELL", quantity: 250000, price: 110.52 }])
 })
+
+test("overnightNewsCheck: each 9:09 news stock bought at the open — the move it had already made and what was left", async () => {
+  const { overnightNewsCheck } = await import("../../src/services/market/report-check.js")
+  const bar = (symbol: string, prevClose: number, open: number, high: number, close: number) => ({ symbol, prevClose, open, high, low: open, close, volume: 1, turnoverLakhs: 1, deliveryPercent: 0 })
+  const bars = new Map([["SHALPAINTS", bar("SHALPAINTS", 97.42, 107, 116.8, 103.97)], ["RATNAVEER", bar("RATNAVEER", 370.25, 390, 406.8, 403.3)]])
+  const block = overnightNewsCheck([{ symbol: "SHALPAINTS", kinds: ["press release"] }, { symbol: "RATNAVEER", kinds: ["press release"] }, { symbol: "GONE", kinds: ["order"] }], bars)
+  assert.equal(block, [
+    "## Overnight news — bought at the open, how did it go?",
+    "",
+    "**2 stocks bought at the 9:15 open: +0.3% on average by the close · 1 rose, 1 fell.** The move before 9:15 (the gap) can't be bought.",
+    "",
+    "| Stock | Filing | Gap at the open | High of the day | Open → close |",
+    "|---|---|---|---|---|",
+    "| RATNAVEER | press release | +5.3% | +9.9% | +3.4% |",
+    "| SHALPAINTS | press release | +9.8% | +19.9% | -2.8% |",
+  ].join("\n"))
+  assert.equal(overnightNewsCheck([], bars), undefined)
+})
+
+test("overnightNewsBlocks: bad, good and other news in separate sections; bad news in Do now when held", async () => {
+  const { overnightNewsBlocks } = await import("../../src/services/market/alert.js")
+  const row = (symbol: string, kinds: any[], gapPercent: number) => ({ symbol, kinds, headline: `${symbol} filing`, link: "", gapPercent })
+  const { blocks, doNow } = overnightNewsBlocks([row("SHALPAINTS", ["press release"], 9.8), row("ASHOKA", ["order"], 7.3), row("AARTISURF", ["regulatory"], 4.9), row("ACME", ["acquisition"], 1)], new Set(["ACME"]), new Set(["AARTISURF"]))
+  assert.deepEqual(doNow, ["**AARTISURF** (you hold it): bad news filed since the last close (regulatory) — review before 9:15"])
+  assert.equal(blocks.length, 4)
+  assert.match(blocks[0], /already moved before 9:15/)
+  assert.match(blocks[1], /^## 🔴 Bad news — avoid \(1\)/)
+  assert.match(blocks[1], /\| 🔴 \*\*AARTISURF\*\* .* \| \+4\.9% \| regulatory: AARTISURF filing \| you hold it — review \|/)
+  assert.match(blocks[2], /^## 🟢 Good news — orders, acquisitions, new capacity \(2\)/)
+  assert.match(blocks[2], /ASHOKA[\s\S]*ACME\*\* .*\(today's pick\)/)
+  assert.match(blocks[3], /^## Other filings — read before acting \(1\)/)
+  assert.match(blocks[3], /SHALPAINTS/)
+})

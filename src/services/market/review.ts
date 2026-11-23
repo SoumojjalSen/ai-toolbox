@@ -1,5 +1,5 @@
 import { loadStockSignals, parseDailyPriceFile, formatPriceFileDate, type DailyPriceRow, type ScanFlags } from "./scan.js"
-import { parseReportCalls, judgeCall, judgeOpen, groupRisers, whatWasSaid, type Verdict } from "./report-check.js"
+import { parseReportCalls, judgeCall, judgeOpen, groupRisers, whatWasSaid, overnightNewsCheck, type Verdict } from "./report-check.js"
 import { scorePick, buildTrackRecord, buyLimit, type ReportPick, type Finding } from "./scorecard.js"
 import { readHoldings } from "./holdings.js"
 import { fetchFilingHistory, fetchRecentResultsSymbols } from "./lenses.js"
@@ -204,6 +204,10 @@ export async function buildMorningCheck(todayBars: Map<string, DailyPriceRow>, s
         `| **${verdict.call.symbol}** | ${verdict.call.section}${verdict.call.kind === "up" ? " 🟢" : verdict.call.kind === "down" ? " 🔴" : ""} | ${verdict.result} | ${mark(verdict.correct)} |`)).replace(/^\n/, ""),
     ].join("\n"))
   }
+
+  // a2) the 9:09 overnight-news list, as if bought at the open
+  const newsCheck = overnightNewsCheck((await readJson<{ symbol: string; kinds: string[] }[]>(`overnight-news/${todayIst()}.json`)) ?? [], todayBars)
+  if (newsCheck) blocks.push(newsCheck)
 
   // b) every riser, by what the system said that morning
   const priceFile = await readText(`prices/${formatPriceFileDate(new Date(`${todayIst()}T12:00:00+05:30`))}.csv`)
